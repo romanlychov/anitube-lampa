@@ -2,11 +2,11 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.1';
+    var VERSION = '0.2.2';
     var BASE = 'https://anitube.in.ua/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v021-style';
+    var STYLE = 'anitube-lampa-v022-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -73,13 +73,47 @@
             if (seen[href]) continue;
 
             var node = a;
-            var img = null;
-            for (var depth = 0; depth < 5 && node; depth++, node = node.parentElement) {
-                img = node.querySelector && node.querySelector('img');
-                if (img) break;
+            var image = '';
+            var bestScore = -1;
+            for (var depth = 0; depth < 6 && node; depth++, node = node.parentElement) {
+                if (!node.querySelectorAll) continue;
+                var imgs = node.querySelectorAll('img');
+                for (var j = 0; j < imgs.length; j++) {
+                    var candidate = imgs[j];
+                    var attrs = [
+                        candidate.getAttribute('data-original'),
+                        candidate.getAttribute('data-src'),
+                        candidate.getAttribute('data-lazy-src'),
+                        candidate.getAttribute('data-original-src'),
+                        candidate.getAttribute('data-image'),
+                        candidate.getAttribute('src'),
+                        candidate.getAttribute('data-srcset'),
+                        candidate.getAttribute('srcset')
+                    ];
+                    var raw = '';
+                    for (var k = 0; k < attrs.length; k++) {
+                        if (attrs[k]) {
+                            raw = attrs[k].split(',')[0].trim().split(/\\s+/)[0];
+                            if (raw) break;
+                        }
+                    }
+                    var candidateUrl = absolute(raw);
+                    if (!candidateUrl || /blank|spacer|pixel|logo|avatar|icon/i.test(candidateUrl)) continue;
+                    var className = String(candidate.className || '').toLowerCase();
+                    var score = 10 - depth;
+                    if (/poster|cover|thumb|preview|image|photo/i.test(className)) score += 20;
+                    if (candidate.getAttribute('data-original') || candidate.getAttribute('data-src')) score += 5;
+                    if (candidate.naturalWidth > 100 || candidate.width > 100) score += 5;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        image = candidateUrl;
+                    }
+                }
+                if (!image && node.getAttribute && node.getAttribute('style')) {
+                    var bg = node.getAttribute('style').match(/background-image\\s*:\\s*url\\([\\'"]?([^\\)'"]+)/i);
+                    if (bg && bg[1]) image = absolute(bg[1]);
+                }
             }
-            var image = img ? absolute(img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original-src') || img.getAttribute('src')) : '';
-            if (image && /blank|spacer|pixel/i.test(image)) image = '';
             seen[href] = true;
             found.push({ title: title, url: href, image: image });
         }
@@ -127,7 +161,7 @@
                 card.find('.atl-name').text(item.title);
                 if (item.image) card.find('img').attr('src', item.image).removeClass('atl-missing').on('error', function () { $(this).addClass('atl-missing'); });
                 else card.find('img').addClass('atl-missing');
-                card.on('hover:enter', function () {
+                card.on('hover:enter click', function () {
                     Lampa.Activity.push({ url: item.url, title: item.title, component: DETAIL, page: 1, item: item });
                 });
                 grid.append(card);
@@ -173,6 +207,17 @@
         });
         root.find('.atl-refresh').on('hover:enter click', function () { load(currentUrl); });
         this.create = function () { load(currentUrl); return root; };
+        this.start = function () {
+            Lampa.Controller.add('content', {
+                toggle: function () {
+                    Lampa.Controller.collectionSet(root);
+                    Lampa.Controller.collectionFocus(false, root);
+                },
+                back: function () { Lampa.Activity.backward(); }
+            });
+            Lampa.Controller.toggle('content');
+        };
+        this.stop = function () {};
         this.render = function () { return root; };
         this.destroy = function () { net.clear(); root.remove(); };
     }
@@ -202,6 +247,17 @@
             }, net);
             return root;
         };
+        this.start = function () {
+            Lampa.Controller.add('content', {
+                toggle: function () {
+                    Lampa.Controller.collectionSet(root);
+                    Lampa.Controller.collectionFocus(false, root);
+                },
+                back: function () { Lampa.Activity.backward(); }
+            });
+            Lampa.Controller.toggle('content');
+        };
+        this.stop = function () {};
         this.render = function () { return root; };
         this.destroy = function () { net.clear(); root.remove(); };
     }
