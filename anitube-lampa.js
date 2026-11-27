@@ -153,13 +153,25 @@
         }
 
         function doSearch(event) {
-            event.preventDefault();
+            if (event && event.preventDefault) event.preventDefault();
             var value = root.find('.atl-query').val().trim();
             if (!value) { load(BASE); return; }
             var url = BASE + '?do=search&subaction=search&story=' + encodeURIComponent(value);
             Lampa.Activity.push({ url: url, title: 'Пошук: ' + value, component: LIST, page: 1, sourceUrl: url, search: value });
+        }
+
+        root.find('.atl-search').on('submit', doSearch);
+        root.find('.atl-search-submit').on('hover:enter click', doSearch);
+        root.find('.atl-query').on('hover:enter click', function () {
+            var input = $(this);
+            if (Lampa.Input && Lampa.Input.edit) {
+                Lampa.Input.edit({ title: 'Пошук аніме', value: input.val(), free: true, nomic: true }, function (value) {
+                    input.val(value || '');
+                    doSearch();
+                });
+            }
         });
-        root.find('.atl-refresh').on('hover:enter', function () { load(currentUrl); });
+        root.find('.atl-refresh').on('hover:enter click', function () { load(currentUrl); });
         this.create = function () { load(currentUrl); return root; };
         this.render = function () { return root; };
         this.destroy = function () { net.clear(); root.remove(); };
