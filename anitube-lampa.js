@@ -277,7 +277,7 @@
             grid.empty();
             root.find('.atl-actions').empty();
             var searchHeaders = query ? { 'Referer': BASE + 'anime/', 'X-Requested-With': 'XMLHttpRequest' } : {};
-            var requestUrl = query && url.indexOf('/anime/') >= 0
+            var requestUrl = query && url === BASE + 'anime/'
                 ? BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(query)
                 : url;
             requestText(net, requestUrl, function (html) {
