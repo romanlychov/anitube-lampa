@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.14';
+    var VERSION = '0.2.15';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0214-style';
+    var STYLE = 'anitube-lampa-v0215-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -70,6 +70,18 @@
             .trim();
     }
 
+    function relatedBaseTitle(value) {
+        var name = cleanTitle(value).toLowerCase()
+            .replace(/\([^)]*(?:сезон|season|фільм|film|movie|ova|спецвипуск|special)[^)]*\)/ig, ' ')
+            .split(/\s*\/\s*/)[0]
+            .split(/\s*[:：]\s*/)[0]
+            .replace(/\s+/g, ' ').trim();
+        name = name.replace(/\s+(?:фільм|film|movie|ova|special|спецвипуск)\s*(?:№?\s*\d+)?(?:\s+.*)?$/i, '').trim();
+        if (/^(?:naruto|наруто)\b/i.test(name)) return 'naruto';
+        if (/^(?:one\s*piece|ван\s*пісс?|великий\s+куш)\b/i.test(name)) return 'one piece';
+        return name;
+    }
+
     function parseCards(html) {
         var doc = document.createElement('div'); doc.innerHTML = html;
         var found = [], seen = {};
@@ -80,11 +92,35 @@
             var heading = link.querySelector('h2,h3,h4,[itemprop="name"]');
             var title = cleanTitle(link.getAttribute('title') || (heading && heading.textContent) || link.textContent || '');
             if (!title || title.length < 2 || title.length > 180) return;
-            var scope = container || link.parentNode;
-            var poster = scope && scope.querySelector ? scope.querySelector('img') : link.querySelector('img');
-            var raw = poster && (poster.getAttribute('data-original') || poster.getAttribute('data-src') || poster.getAttribute('data-lazy-src') || poster.getAttribute('src'));
+            var scope = container || null;
+            if (!scope) {
+                var parent = link.parentNode;
+                for (var depth = 0; parent && depth < 8; depth++, parent = parent.parentNode) {
+                    if (parent.querySelector && parent.querySelector('img')) {
+                        scope = parent;
+                        var cls = String(parent.className || '');
+                        if (/story|shortstory|news|anime|item/i.test(cls) || String(parent.tagName || '').toLowerCase() === 'article') break;
+                    }
+                }
+            }
+            var poster = scope && scope.querySelector ? scope.querySelector('span.story_post img, .story_post img, img') : link.querySelector('img');
+            var raw = '';
+            if (poster) {
+                raw = poster.getAttribute('data-original') || poster.getAttribute('data-src') ||
+                    poster.getAttribute('data-lazy-src') || poster.getAttribute('data-original-src') ||
+                    poster.getAttribute('data-image') || poster.getAttribute('data-srcset') ||
+                    poster.getAttribute('srcset') || poster.getAttribute('src') || '';
+                if (raw.indexOf(',') >= 0) raw = raw.split(',')[0].trim().split(/\s+/)[0];
+            }
             var image = raw ? absolute(raw, BASE) : '';
-            if (image && /blank|spacer|pixel|logo|avatar|icon/i.test(image)) image = '';
+            if (image && /(?:spacer|blank|pixel|transparent|logo|avatar|icon)\.(?:gif|png|jpe?g|webp)(?:$|[?#])/i.test(image)) image = '';
+            if (!image && scope && scope.querySelectorAll) {
+                var imageLinks = scope.querySelectorAll('a[href]');
+                for (var il = 0; il < imageLinks.length; il++) {
+                    var candidateImage = absolute(imageLinks[il].getAttribute('href') || '', BASE);
+                    if (/\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(candidateImage)) { image = candidateImage; break; }
+                }
+            }
             seen[href] = true; found.push({ title: title, url: href, image: image });
         }
         var articles = doc.querySelectorAll('#dle-content article.story, article.story');
@@ -102,7 +138,7 @@
         if (!data || !data.success || !data.response) return [];
         var doc = document.createElement('div');
         doc.innerHTML = data.response;
-        var entries = doc.querySelectorAll('li[data-id][data-file]');
+        var entries = doc.querySelectorAll('.playlists-videos li[data-file], li[data-id][data-file], li[data-file]');
         var labels = {};
         for (var i = 0; i < entries.length; i++) {
             var id = entries[i].getAttribute('data-id');
@@ -119,7 +155,9 @@
                 var prefix = idParts.slice(0, k).join('_');
                 if (labels[prefix]) path.push(labels[prefix]);
             }
+            var voice = node.getAttribute('data-voice') || '';
             var label = path.join(' · ') || (node.textContent || '').trim() || ('Серія ' + (result.length + 1));
+            if (voice && label.toLowerCase().indexOf(voice.toLowerCase()) < 0) label += ' · ' + voice;
             result.push({ url: absolute(file, BASE).replace(/&amp;/g, '&'), label: label });
         }
         return result;
@@ -457,12 +495,7 @@
         function addRelatedSeasons(html) {
             var doc = document.createElement('div');
             doc.innerHTML = html;
-            var baseTitle = cleanTitle(title)
-                .replace(/\s*\([^)]*(?:сезон|season|фільм|movie|ova|спецвипуск)[^)]*\)\s*/ig, ' ')
-                .replace(/\s*[:：-]\s*.+$/, '')
-                .split(/\s*\/\s*/)[0]
-                .replace(/\s+/g, ' ').trim().toLowerCase();
-            if (/^(?:one\s*piece|ван\s*піс|ван\s*пісс)$/i.test(baseTitle)) baseTitle = 'ван піс';
+            var baseTitle = relatedBaseTitle(title);
 
             var candidates = [];
             var containers = doc.querySelectorAll(
@@ -524,17 +557,17 @@
             } else if (baseTitle.length >= 3) {
                 // Якщо сторінка не містить явного блоку пов'язаних публікацій,
                 // шукаємо інші публікації з тією самою назвою через пошук AniTube.
-                var relatedQuery = baseTitle === 'ван піс' ? 'Ван Піс' : baseTitle;
+                var relatedQuery = baseTitle === 'one piece' ? 'Ван Піс' : (baseTitle === 'naruto' ? 'Наруто' : baseTitle);
                 var searchUrl = BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(relatedQuery);
                 requestText(relatedNet, searchUrl, function (searchHtml) {
                     if (!alive) return;
                     var matches = parseCards(searchHtml);
-                    var searchBase = baseTitle.replace(/[^a-zа-яіїєґ0-9]+/gi, ' ').trim();
+                    var searchBase = baseTitle;
                     var count = 0;
                     matches.forEach(function (match) {
                         if (!match.url || match.url === item.url) return;
-                        var candidate = cleanTitle(match.title).replace(/[^a-zа-яіїєґ0-9]+/gi, ' ').trim().toLowerCase();
-                        if (!candidate || candidate === searchBase || candidate.indexOf(searchBase) !== 0) return;
+                        var candidate = relatedBaseTitle(match.title);
+                        if (!candidate || candidate !== searchBase) return;
                         if (seen[match.url]) return;
                         seen[match.url] = true;
                         var button = $('<button type="button" class="atl-button selector"></button>').text(cleanTitle(match.title));
@@ -609,7 +642,7 @@
                     ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
                     : 'Не вдалося отримати плейлист AniTube: ' + message);
                 syncNavigation(true);
-            }, { 'Referer': item.url, 'Accept': 'application/json, text/javascript, */*; q=0.01' });
+            }, { 'Referer': BASE, 'X-Requested-With': 'XMLHttpRequest', 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
         }
 
         function playEpisode(data, episodeTitle) {
@@ -724,7 +757,7 @@
                 var pageTitle = doc.querySelector('#dle-content h1, #dle-content h2[itemprop="name"], h1[itemprop="name"], h1');
                 var image = doc.querySelector('#dle-content .fullstory img, #dle-content .full-story img, #dle-content .fullstory img, #dle-content article img');
                 var text = doc.querySelector('#dle-content .fullstory, #dle-content .full-story, #dle-content .story_c_text, .fullstory, .full-story');
-                if (image) root.find('.atl-title').before($('<img>').attr('src', absolute(image.getAttribute('src') || image.getAttribute('data-src') || image.getAttribute('data-original'), item.url)));
+                if (image) { var detailImageUrl = image.getAttribute('data-original') || image.getAttribute('data-src') || image.getAttribute('data-lazy-src') || image.getAttribute('src'); if (detailImageUrl && !/spacer\\.gif/i.test(detailImageUrl)) root.find('.atl-title').before($('<img>').attr('src', absolute(detailImageUrl, item.url))); }
                 if (pageTitle && pageTitle.textContent.trim()) {
                     title = cleanTitle(pageTitle.getAttribute('title') || pageTitle.textContent);
                     root.find('.atl-title').text(title);
