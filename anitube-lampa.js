@@ -2,11 +2,11 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.4';
+    var VERSION = '0.2.5';
     var BASE = 'https://anitube.in.ua/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v024-style';
+    var STYLE = 'anitube-lampa-v025-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -149,6 +149,13 @@
             status.text('Не вдалося завантажити каталог: ' + message + '. Перевірте інтернет і спробуйте ще раз.');
         }
 
+        function syncNavigation() {
+            var active = Lampa.Controller.enabled();
+            if (!active || active.name !== 'content') return;
+            Lampa.Controller.collectionSet(root);
+            Lampa.Controller.collectionFocus(false, root);
+        }
+
         function render(items) {
             grid.empty();
             if (!items.length) {
@@ -183,7 +190,11 @@
                     more.on('hover:enter click', function () { load(nextUrl); });
                     root.find('.atl-actions').append(more);
                 }
-            }, showError, net);
+                syncNavigation();
+            }, function (message) {
+                showError(message);
+                syncNavigation();
+            }, net);
         }
 
         function doSearch(event) {
