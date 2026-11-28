@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.17';
+    var VERSION = '0.2.18';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0217-style';
+    var STYLE = 'anitube-lampa-v0218-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -49,7 +49,8 @@
             + '.atl-player-screen{min-height:13em;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.7em;background:linear-gradient(135deg,#172b3a,#0b1119);border-radius:.4em;text-align:center;color:#dce8f2;overflow:hidden;}'
             + '.atl-player-mark{font-size:2.5em;color:#22c8bd;}'
             + '.atl-player-caption{font-size:1.05em;padding:.6em;}'
-            + '.atl-player-frame{display:block;width:100%;height:22em;border:0;background:#000;}'
+            + '.atl-player-frame{display:block;width:100%;height:28em;border:0;background:#000;}'
+            + '.atl-player-frame.atl-anitube-frame{height:34em;background:#101722;}'
             + '.atl-player-controls{display:flex;flex-wrap:wrap;gap:.55em;margin-top:.8em;}'
             + '.atl-player-controls .atl-button{flex:1 1 8em;min-width:7em;}'
             + '.atl-player-status{padding-top:.65em;color:#aebdca;font-size:.9em;line-height:1.45;}'
@@ -95,27 +96,47 @@
     function parseCards(html) {
         var doc = document.createElement('div');
         doc.innerHTML = html;
-        var found = [], seen = {}, seenImages = {};
+        var found = [], seen = {};
         function getImage(node) {
             if (!node) return '';
-            var attrs = ['data-original','data-src','data-lazy-src','data-original-src','data-image','data-thumb','data-bg','src'];
+            function valid(raw) {
+                var url = absolute(String(raw || '').trim().replace(/^url\(["']?|["']?\)$/g, ''), BASE);
+                return url && /^https?:\/\//i.test(url) && !/(spacer|blank|pixel|transparent|logo|avatar|icon|placeholder)/i.test(url) ? url : '';
+            }
+            function fromSet(value) {
+                var parts = String(value || '').split(','), best = '', bestSize = -1;
+                for (var s = 0; s < parts.length; s++) {
+                    var bits = parts[s].trim().split(/\s+/);
+                    var candidate = valid(bits[0]);
+                    if (!candidate) continue;
+                    var size = bits[1] ? (parseFloat(bits[1]) * (/x$/i.test(bits[1]) ? 1000 : 1)) : s;
+                    if (size >= bestSize) { best = candidate; bestSize = size; }
+                }
+                return best;
+            }
+            var attrs = ['data-original','data-src','data-lazy-src','data-original-src','data-image','data-thumb','data-bg','data-fallback-src','src'];
             for (var i = 0; i < attrs.length; i++) {
                 var raw = String(node.getAttribute(attrs[i]) || '').trim();
                 if (!raw) continue;
-                var url = absolute(raw, BASE);
-                if (url && /^https?:\/\//i.test(url) && !/(spacer|blank|pixel|transparent|logo|avatar|icon)/i.test(url)) return url;
+                var found = valid(raw);
+                if (found) return found;
+            }
+            var sets = ['data-srcset','data-lazy-srcset','data-original-srcset','srcset'];
+            for (var j = 0; j < sets.length; j++) {
+                var setUrl = fromSet(node.getAttribute(sets[j]));
+                if (setUrl) return setUrl;
             }
             var style = node.getAttribute('style') || '';
             var match = style.match(/background-image\s*:\s*url\(["']?([^"')]+)["']?\)/i);
             if (match) {
-                var bg = absolute(match[1], BASE);
-                if (bg && !/(spacer|blank|pixel|transparent|logo|avatar|icon)/i.test(bg)) return bg;
+                var bg = valid(match[1]);
+                if (bg) return bg;
             }
             return '';
         }
         function findPoster(scope, href, title) {
             if (!scope || !scope.querySelectorAll) return '';
-            var nodes = scope.querySelectorAll('img,[style*="background-image"]');
+            var nodes = scope.querySelectorAll('img,source[srcset],[style*="background-image"]');
             var best = '', rankBest = 0;
             for (var i = 0; i < nodes.length; i++) {
                 var node = nodes[i], parent = node, rank = 0;
@@ -125,13 +146,17 @@
                         if (absolute(parent.getAttribute('href') || '', BASE) === href) rank = Math.max(rank, 4);
                         break;
                     }
-                    if (/(^|\s)(story_post|poster|cover|shortstory-image)(\s|$)/i.test(String(parent.className || ''))) rank = Math.max(rank, 3);
+                    if (/(^|\s)(story_post|poster|cover|shortstory-image|shortstory|story|anime-card|anime_item)(\s|$)/i.test(String(parent.className || ''))) rank = Math.max(rank, 3);
                     parent = parent.parentNode;
                 }
                 var alt = String(node.getAttribute('alt') || node.getAttribute('title') || '').toLowerCase();
                 var t = String(title || '').toLowerCase();
                 if (alt && t && (t.indexOf(alt) >= 0 || alt.indexOf(t) >= 0)) rank = Math.max(rank, 2);
-                if (rank < 2) continue;
+                // У картці головної сторінки постер часто є сусідом заголовка,
+                // а не вкладений у те саме посилання; межа article/card уже надійна.
+                if (rank < 2 && scope && /^(article|div|li)$/i.test(String(scope.tagName || '')) &&
+                    /story|shortstory|anime|poster|card/i.test(String(scope.className || ''))) rank = 1;
+                if (rank < 1) continue;
                 var url = getImage(node);
                 if (url && rank > rankBest) { best = url; rankBest = rank; }
             }
@@ -155,19 +180,18 @@
                 }
             }
             var image = findPoster(scope, href, title);
-            if (image) {
-                var key = image.split('?')[0].split('#')[0];
-                if (seenImages[key]) image = '';
-                else seenImages[key] = true;
-            }
+            // Не відкидаємо однакові адреси зображень: сайт може законно
+            // використовувати одне зображення для кількох пов'язаних публікацій.
             seen[href] = true;
             found.push({ title: title, url: href, image: image });
         }
-        var articles = doc.querySelectorAll('#dle-content article.story, article.story');
-        for (var i = 0; i < articles.length; i++) add(articles[i].querySelector('h2[itemprop="name"] a[href], h2 a[href], h3 a[href], a[href*=".html"]'), articles[i]);
+        // На головній AniTube різні блоки каталогу можуть мати різні класи карток.
+        // Тому збираємо посилання на публікації, а контейнер картки визначаємо окремо.
+        var links = doc.querySelectorAll('#dle-content a[href*=".html"], article.story a[href*=".html"], .shortstory a[href*=".html"], .content a[href*=".html"], main a[href*=".html"]');
+        for (var i = 0; i < links.length; i++) add(links[i], null);
         if (!found.length) {
-            var links = doc.querySelectorAll('#dle-content a[href], .content a[href], main a[href], a[href]');
-            for (var j = 0; j < links.length; j++) add(links[j], null);
+            var fallbackLinks = doc.querySelectorAll('a[href*=".html"]');
+            for (var j = 0; j < fallbackLinks.length; j++) add(fallbackLinks[j], null);
         }
         return found;
     }
@@ -667,6 +691,17 @@
             playerStatus.text('Відкрито вбудований плеєр FenixPlay. Якщо запит до API з Lampa заблокований, озвучення та субтитри можна вибрати у меню самого відеоплеєра.');
         }
 
+        function showAniTubeFrame() {
+            playerScreen.find('iframe').remove();
+            playerMark.hide();
+            playerCaption.hide();
+            playerScreen.css({ display: 'block', padding: 0 });
+            var frame = $('<iframe class="atl-player-frame atl-anitube-frame" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
+            frame.attr('src', item.url);
+            playerScreen.append(frame);
+            playerStatus.text('Вбудовано сторінку AniTube. Її власний плеєр і список озвучень завантажуються всередині цього вікна; керування доступне в самому вікні.');
+        }
+
         function resetFenixFrame() {
             playerScreen.find('iframe').remove();
             playerScreen.css({ display: 'flex', padding: '' });
@@ -851,8 +886,10 @@
                     status.text('Знайдено серій: ' + vodUrls.length + '. Керування доступне в блоці програвача нижче.');
                     playerStatus.text('Виберіть серію, потім озвучення та субтитри.');
                 } else {
-                    status.text('AniTube не повернув розпізнаваних посилань на серії.');
-                    playerStatus.text('Список серій не знайдено. Серверний запит плейлиста ще потрібно виправити.');
+                    status.text('Список серій не отримано через запит Lampa. Відкриваю вбудований плеєр AniTube.');
+                    var directVod = extractVod(htmlCache);
+                    if (directVod) showFenixFrame(directVod);
+                    else showAniTubeFrame();
                 }
                 refreshPlayerUI();
                 syncNavigation(true);
@@ -866,7 +903,12 @@
                 status.text(vodUrls.length
                     ? 'Знайдено посилання на серії у сторінці тайтлу: ' + vodUrls.length + '.'
                     : 'Не вдалося отримати плейлист AniTube' + (httpStatus ? ' (' + httpStatus + ')' : '') + ': ' + message + (responseHint ? ' — ' + responseHint : ''));
-                playerStatus.text(vodUrls.length ? 'Виберіть серію у блоці програвача.' : 'Поки немає даних для вибору серії. HTTP 403 не усунуто.');
+                if (vodUrls.length) playerStatus.text('Виберіть серію у блоці програвача.');
+                else {
+                    var directVod = extractVod(htmlCache);
+                    if (directVod) showFenixFrame(directVod);
+                    else showAniTubeFrame();
+                }
                 refreshPlayerUI();
                 syncNavigation(true);
             }, { 'Referer': item.url, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
@@ -1012,7 +1054,7 @@
 
     function addMenu() {
         if ($('.atl-menu-item').length) return;
-        var item = $('<li class="menu__item selector atl-menu-item"><div class="menu__ico"><svg viewBox="0 0 44 44" aria-hidden="true"><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="currentColor" opacity=".13"/><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m18 16 11 6-11 6V16Z" fill="currentColor"/><path d="M13 10.8 22 6l9 4.8M13 33.2l9 4.8 9-4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m33.5 7 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="currentColor"/></svg></div><div class="menu__text">AniTube</div></li>');
+        var item = $('<li class="menu__item selector atl-menu-item"><div class="menu__ico"><img src="https://romanlychov.github.io/anitube-lampa/anitube-icon.svg" alt="" style="width:2.5em;height:2.5em;border-radius:50%;object-fit:cover;box-shadow:0 0 .45em #13d9e8"></div><div class="menu__text">AniTube</div></li>');
         item.on('hover:enter', function () {
             Lampa.Activity.push({ url: '', title: 'AniTube', component: LIST, page: 1, sourceUrl: BASE + 'f/sort=date/order=desc/page/1/' });
         });
