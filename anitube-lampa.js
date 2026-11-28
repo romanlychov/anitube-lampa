@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.8';
+    var VERSION = '0.2.9';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v028-style';
+    var STYLE = 'anitube-lampa-v029-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -65,52 +65,91 @@
         doc.innerHTML = html;
         var found = [];
         var seen = {};
-        var anchors = doc.querySelectorAll('a[href]');
-        for (var i = 0; i < anchors.length; i++) {
-            var a = anchors[i];
-            var href = absolute(a.getAttribute('href'));
-            var title = (a.getAttribute('title') || a.textContent || '').replace(/\s+/g, ' ').trim();
-            if (!href || !/anitube\.in\.ua\//i.test(href) || !/\.html(?:$|[?#])/i.test(href) || title.length < 2) continue;
+        // AniTube розміщує справжні картки каталогу в article.story усередині #dle-content.
+        // Не перебираємо всі посилання .html на сторінці: там є меню, друзі, жанри та інші блоки.
+        var articles = doc.querySelectorAll('#dle-content article.story, article.story');
+        for (var i = 0; i < articles.length; i++) {
+            var article = articles[i];
+            var titleLink = article.querySelector('h2[itemprop="name"] a[href], h2 a[href]');
+            if (!titleLink) continue;
+            var href = absolute(titleLink.getAttribute('href'));
+            var title = (titleLink.textContent || titleLink.getAttribute('title') || '').replace(/\\s+/g, ' ').trim();
+            if (!href || !/^https?:\\/\\/anitube\\.in\\.ua\\//i.test(href) || !/\\.html(?:$|[?#])/i.test(href) || title.length < 2) continue;
             if (seen[href]) continue;
-            var node = a;
-            var image = '';
-            var bestScore = -1;
-            for (var depth = 0; depth < 6 && node; depth++, node = node.parentElement) {
-                if (!node.querySelectorAll) continue;
-                var imgs = node.querySelectorAll('img');
-                for (var j = 0; j < imgs.length; j++) {
-                    var candidate = imgs[j];
-                    var attrs = [
-                        candidate.getAttribute('data-original'), candidate.getAttribute('data-src'),
-                        candidate.getAttribute('data-lazy-src'), candidate.getAttribute('data-original-src'),
-                        candidate.getAttribute('data-image'), candidate.getAttribute('src'),
-                        candidate.getAttribute('data-srcset'), candidate.getAttribute('srcset')
-                    ];
-                    var raw = '';
-                    for (var k = 0; k < attrs.length; k++) {
-                        if (attrs[k]) {
-                            raw = attrs[k].split(',')[0].trim().split(/\s+/)[0];
-                            if (raw) break;
-                        }
-                    }
-                    var candidateUrl = absolute(raw);
-                    if (!candidateUrl || /blank|spacer|pixel|logo|avatar|icon/i.test(candidateUrl)) continue;
-                    var className = String(candidate.className || '').toLowerCase();
-                    var score = 10 - depth;
-                    if (/poster|cover|thumb|preview|image|photo/i.test(className)) score += 20;
-                    if (candidate.getAttribute('data-original') || candidate.getAttribute('data-src')) score += 5;
-                    if (candidate.naturalWidth > 100 || candidate.width > 100) score += 5;
-                    if (score > bestScore) { bestScore = score; image = candidateUrl; }
-                }
-                if (!image && node.getAttribute && node.getAttribute('style')) {
-                    var bg = node.getAttribute('style').match(/background-image\s*:\s*url\(([^)]+)\)/i);
-                    if (bg && bg[1]) image = absolute(bg[1].replace(/^['\"]|['\"]$/g, '').trim());
-                }
-            }
+
+            // Постер беремо тільки з контейнера поточної картки, не з батьківських блоків.
+            var poster = article.querySelector('span.story_post img, .story_post img');
+            var raw = poster && (
+                poster.getAttribute('data-original') || poster.getAttribute('data-src') ||
+                poster.getAttribute('data-lazy-src') || poster.getAttribute('src')
+            );
+            var image = raw ? absolute(raw, BASE) : '';
+            if (image && /blank|spacer|pixel|logo|avatar|icon/i.test(image)) image = '';
+
             seen[href] = true;
             found.push({ title: title, url: href, image: image });
         }
         return found;
+    }
+
+    function parsePlaylist(raw) {
+        var data;
+        try { data = JSON.parse(raw); } catch (e) { data = null; }
+        if (!data || !data.success || !data.response) return [];
+        var doc = document.createElement('div');
+        doc.innerHTML = data.response;
+        var entries = doc.querySelectorAll('li[data-id][data-file]');
+        var labels = {};
+        for (var i = 0; i < entries.length; i++) {
+            var id = entries[i].getAttribute('data-id');
+            labels[id] = (entries[i].textContent || '').replace(/\\s+/g, ' ').trim();
+        }
+        var result = [];
+        for (var j = 0; j < entries.length; j++) {
+            var node = entries[j];
+            var file = node.getAttribute('data-file');
+            if (!file || file === 'false' || file === '0') continue;
+            var idParts = (node.getAttribute('data-id') || '').split('_');
+            var path = [];
+            for (var k = 1; k <= idParts.length; k++) {
+                var prefix = idParts.slice(0, k).join('_');
+                if (labels[prefix]) path.push(labels[prefix]);
+            }
+            var label = path.join(' · ') || (node.textContent || '').trim() || ('Серія ' + (result.length + 1));
+            result.push({ url: absolute(file, BASE).replace(/&amp;/g, '&'), label: label });
+        }
+        return result;
+    }
+
+    function parseLegacyPlaylist(html) {
+        var scripts = html.match(/<script[^>]*>[\\s\\S]*?<\\/script>/gi) || [];
+        for (var i = 0; i < scripts.length; i++) {
+            var code = scripts[i];
+            var start = code.indexOf('RalodePlayer.init(');
+            if (start < 0) continue;
+            var tail = code.slice(start + 'RalodePlayer.init('.length);
+            var end = tail.indexOf(');');
+            if (end < 0) continue;
+            try {
+                var args = JSON.parse('[' + tail.slice(0, end) + ']');
+                var names = args[0] || [];
+                var groups = args[1] || [];
+                var result = [];
+                for (var p = 0; p < groups.length; p++) {
+                    for (var e = 0; e < (groups[p] || []).length; e++) {
+                        var item = groups[p][e] || {};
+                        var codeValue = String(item.code || '');
+                        var match = codeValue.match(/https?:\\/\\/[^"\\s'<>]+/i);
+                        if (match) result.push({
+                            url: absolute(match[0], BASE),
+                            label: (names[p] || '') + (names[p] ? ' · ' : '') + (item.name || ('Серія ' + (e + 1)))
+                        });
+                    }
+                }
+                if (result.length) return result;
+            } catch (e) {}
+        }
+        return [];
     }
 
     function parseNext(html, currentUrl) {
@@ -327,12 +366,43 @@
         }
 
         function addEpisode(url, label) {
-            if (vodUrls.indexOf(url) >= 0) return;
+            if (!url || vodUrls.indexOf(url) >= 0) return;
             vodUrls.push(url);
             var button = $('<button type="button" class="atl-episode selector"></button>').text(label || ('Серія ' + vodUrls.length));
             button.on('hover:focus', function () { focusScroll(this); });
             button.on('hover:enter click', function () { loadVod(url); });
             episodes.append(button);
+        }
+
+        function loadPlaylist() {
+            var match = String(item.url || '').match(/\\/(\\d+)-/);
+            if (!match) {
+                status.text('Не вдалося визначити номер публікації AniTube для отримання списку серій.');
+                syncNavigation(false);
+                return;
+            }
+            status.text('Запитую список серій AniTube…');
+            var playlistUrl = BASE + 'engine/ajax/playlists.php?news_id=' + encodeURIComponent(match[1]) + '&xfield=playlist';
+            requestText(net, playlistUrl, function (raw) {
+                if (!alive) return;
+                var list = parsePlaylist(raw);
+                if (!list.length) list = parseLegacyPlaylist(htmlCache);
+                list.forEach(function (entry) { addEpisode(entry.url, entry.label); });
+                if (vodUrls.length) {
+                    status.text('Знайдено серій та варіантів озвучення: ' + vodUrls.length + '. Вибери потрібний пункт нижче.');
+                } else {
+                    status.text('AniTube не повернув розпізнаваних пунктів плейлиста. Можливо, список формується іншим запитом або потребує додаткових параметрів.');
+                }
+                syncNavigation(true);
+            }, function (message) {
+                if (!alive) return;
+                var fallback = parseLegacyPlaylist(htmlCache);
+                fallback.forEach(function (entry) { addEpisode(entry.url, entry.label); });
+                status.text(vodUrls.length
+                    ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
+                    : 'Не вдалося отримати плейлист AniTube: ' + message);
+                syncNavigation(true);
+            });
         }
 
         function playEpisode(data, episodeTitle) {
@@ -418,45 +488,44 @@
 
         function loadVod(vodUrl) {
             var payload = decodeJwtPayload(vodUrl);
-            if (!payload) {
-                status.text('Не вдалося прочитати посилання на відео FenixPlay.');
+            if (payload) {
+                status.text('Підключення до FenixPlay…');
+                loadEpisodeApi(payload, vodUrl);
                 return;
             }
-            status.text('Підключення до FenixPlay…');
-            loadEpisodeApi(payload, vodUrl);
+            if (/\\.(m3u8|mp4)(?:$|[?#])/i.test(vodUrl)) {
+                status.text('Передаю відеопотік до програвача Lampa…');
+                Lampa.Player.play({ url: vodUrl, title: title, quality: 'auto', movie: object.movie || null });
+                return;
+            }
+            var vod = extractVod(vodUrl);
+            if (vod) {
+                var nested = decodeJwtPayload(vod);
+                if (nested) { loadEpisodeApi(nested, vod); return; }
+            }
+            status.text('Пункт плейлиста отримано, але його посилання не є прямим відеопотоком або розпізнаним посиланням FenixPlay. Потрібно окремо обробити цей формат.');
         }
+
+        var htmlCache = '';
 
         this.create = function () {
             requestText(net, item.url, function (html) {
                 if (!alive) return;
+                htmlCache = html;
                 var doc = document.createElement('div');
                 doc.innerHTML = html;
                 var pageTitle = doc.querySelector('h1') || doc.querySelector('.title');
                 var image = doc.querySelector('.fullstory img, .full-story img, .news img, article img');
                 var text = doc.querySelector('.fullstory, .full-story, .news, article');
-                if (image) root.find('.atl-title').before($('<img>').attr('src', absolute(image.getAttribute('src') || image.getAttribute('data-src'))));
+                if (image) root.find('.atl-title').before($('<img>').attr('src', absolute(image.getAttribute('src') || image.getAttribute('data-src'), item.url)));
                 if (pageTitle && pageTitle.textContent.trim()) {
                     title = pageTitle.textContent.trim();
                     root.find('.atl-title').text(title);
                 }
-                if (text) root.find('.atl-meta').text(text.textContent.replace(/\s+/g, ' ').trim().slice(0, 1800));
+                if (text) root.find('.atl-meta').text(text.textContent.replace(/\\s+/g, ' ').trim().slice(0, 1800));
 
-                var nodes = doc.querySelectorAll('iframe[src], source[src], a[href], [data-src], [data-file], [data-url]');
-                for (var i = 0; i < nodes.length; i++) {
-                    var value = nodes[i].getAttribute('src') || nodes[i].getAttribute('href') ||
-                        nodes[i].getAttribute('data-src') || nodes[i].getAttribute('data-file') ||
-                        nodes[i].getAttribute('data-url') || '';
-                    value = absolute(value, item.url).replace(/&amp;/g, '&');
-                    if (/fenixplay\.xyz\/vod\//i.test(value)) addEpisode(value, 'Відкрити серію ' + (vodUrls.length + 1));
-                }
-                var vod = extractVod(html);
-                if (vod) addEpisode(vod, 'Завантажити доступну серію');
-                if (vodUrls.length) {
-                    status.text('Сторінку аніме розібрано. Вибери серію нижче. Відтворення буде передано до програвача Lampa.');
-                } else {
-                    status.text('У завантаженому HTML сторінки не знайдено прямих посилань FenixPlay. Список серій може формуватися окремим запитом AniTube під час роботи сайту; цей спосіб отримання серій ще не реалізовано.');
-                }
-                syncNavigation(true);
+                // Основний спосіб AniTube: AJAX playlist endpoint за ID публікації.
+                loadPlaylist();
             }, function (message) {
                 if (alive) status.text('Не вдалося завантажити сторінку аніме: ' + message);
             });
