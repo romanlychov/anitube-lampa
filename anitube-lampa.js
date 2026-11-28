@@ -44,7 +44,16 @@
             + '.atl-detail img{max-width:13em;max-height:19em;object-fit:contain;float:left;margin:0 1em 1em 0;}'
             + '.atl-actions{display:flex;gap:.7em;flex-wrap:wrap;margin-top:1.2em;}'
             + '.atl-episode{display:block;width:100%;text-align:left;margin:.35em 0;background:#202a35;color:#fff;border:1px solid #465565;border-radius:.35em;padding:.85em;}'
-            + '.atl-clear{clear:both;}';
+            + '.atl-clear{clear:both;}'
+            + '.atl-player{clear:both;margin:1.4em 0;padding:1em;background:#111923;border:1px solid #344554;border-radius:.55em;}'
+            + '.atl-player-screen{min-height:13em;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.7em;background:linear-gradient(135deg,#172b3a,#0b1119);border-radius:.4em;text-align:center;color:#dce8f2;overflow:hidden;}'
+            + '.atl-player-mark{font-size:2.5em;color:#22c8bd;}'
+            + '.atl-player-caption{font-size:1.05em;padding:.6em;}'
+            + '.atl-player-frame{display:block;width:100%;height:22em;border:0;background:#000;}'
+            + '.atl-player-controls{display:flex;flex-wrap:wrap;gap:.55em;margin-top:.8em;}'
+            + '.atl-player-controls .atl-button{flex:1 1 8em;min-width:7em;}'
+            + '.atl-player-status{padding-top:.65em;color:#aebdca;font-size:.9em;line-height:1.45;}'
+            + '.atl-player .atl-button:disabled{opacity:.45;}';
         var style = document.createElement('style');
         style.id = STYLE;
         style.appendChild(document.createTextNode(css));
@@ -555,6 +564,7 @@
         var playerStatus = root.find('.atl-player-status');
         var playerCaption = root.find('.atl-player-caption');
         var playerScreen = root.find('.atl-player-screen');
+        var playerMark = root.find('.atl-player-mark');
         var title = item.title || 'AniTube';
         root.find('.atl-title').text(title);
         scroll.append(root[0]);
@@ -618,6 +628,7 @@
                 subtitleOptions = [];
                 selectedVoice = 0;
                 selectedSubtitle = -1;
+                resetFenixFrame();
                 playerCaption.text('Завантаження: ' + currentEpisodeLabel);
                 playerStatus.text('Отримую дані серії та доступні озвучення…');
                 refreshPlayerUI();
@@ -643,6 +654,24 @@
                 selectedSubtitle = selected.index;
                 refreshPlayerUI();
             });
+        }
+
+        function showFenixFrame(url) {
+            playerScreen.find('iframe').remove();
+            playerMark.hide();
+            playerCaption.hide();
+            playerScreen.css({ display: 'block', padding: 0 });
+            var frame = $('<iframe class="atl-player-frame" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
+            frame.attr('src', url);
+            playerScreen.append(frame);
+            playerStatus.text('Відкрито вбудований плеєр FenixPlay. Якщо запит до API з Lampa заблокований, озвучення та субтитри можна вибрати у меню самого відеоплеєра.');
+        }
+
+        function resetFenixFrame() {
+            playerScreen.find('iframe').remove();
+            playerScreen.css({ display: 'flex', padding: '' });
+            playerMark.show();
+            playerCaption.show();
         }
 
         function startPlayback() {
@@ -910,6 +939,7 @@
             var payload = decodeJwtPayload(vodUrl);
             if (payload) {
                 status.text('Підключення до FenixPlay…');
+                showFenixFrame(vodUrl);
                 loadEpisodeApi(payload, vodUrl);
                 return;
             }
@@ -921,7 +951,7 @@
             var vod = extractVod(vodUrl);
             if (vod) {
                 var nested = decodeJwtPayload(vod);
-                if (nested) { loadEpisodeApi(nested, vod); return; }
+                if (nested) { showFenixFrame(vod); loadEpisodeApi(nested, vod); return; }
             }
             status.text('Пункт плейлиста отримано, але його посилання не є прямим відеопотоком або розпізнаним посиланням FenixPlay. Потрібно окремо обробити цей формат.');
         }
