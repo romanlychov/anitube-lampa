@@ -65,27 +65,20 @@
         doc.innerHTML = html;
         var found = [];
         var seen = {};
-        // AniTube розміщує справжні картки каталогу в article.story усередині #dle-content.
-        // Не перебираємо всі посилання .html на сторінці: там є меню, друзі, жанри та інші блоки.
         var articles = doc.querySelectorAll('#dle-content article.story, article.story');
         for (var i = 0; i < articles.length; i++) {
             var article = articles[i];
             var titleLink = article.querySelector('h2[itemprop="name"] a[href], h2 a[href]');
             if (!titleLink) continue;
             var href = absolute(titleLink.getAttribute('href'));
-            var title = (titleLink.textContent || titleLink.getAttribute('title') || '').replace(/\\s+/g, ' ').trim();
-            if (!href || !/^https?:\\/\\/anitube\\.in\\.ua\\//i.test(href) || !/\\.html(?:$|[?#])/i.test(href) || title.length < 2) continue;
+            var title = (titleLink.textContent || titleLink.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\.html(?:$|[?#])/i.test(href) || title.length < 2) continue;
             if (seen[href]) continue;
-
-            // Постер беремо тільки з контейнера поточної картки, не з батьківських блоків.
             var poster = article.querySelector('span.story_post img, .story_post img');
-            var raw = poster && (
-                poster.getAttribute('data-original') || poster.getAttribute('data-src') ||
-                poster.getAttribute('data-lazy-src') || poster.getAttribute('src')
-            );
+            var raw = poster && (poster.getAttribute('data-original') || poster.getAttribute('data-src') ||
+                poster.getAttribute('data-lazy-src') || poster.getAttribute('src'));
             var image = raw ? absolute(raw, BASE) : '';
             if (image && /blank|spacer|pixel|logo|avatar|icon/i.test(image)) image = '';
-
             seen[href] = true;
             found.push({ title: title, url: href, image: image });
         }
@@ -102,7 +95,7 @@
         var labels = {};
         for (var i = 0; i < entries.length; i++) {
             var id = entries[i].getAttribute('data-id');
-            labels[id] = (entries[i].textContent || '').replace(/\\s+/g, ' ').trim();
+            labels[id] = (entries[i].textContent || '').split(/\s+/).join(' ').trim();
         }
         var result = [];
         for (var j = 0; j < entries.length; j++) {
@@ -122,9 +115,11 @@
     }
 
     function parseLegacyPlaylist(html) {
-        var scripts = html.match(/<script[^>]*>[\\s\\S]*?<\\/script>/gi) || [];
+        var doc = document.createElement('div');
+        doc.innerHTML = html;
+        var scripts = doc.querySelectorAll('script');
         for (var i = 0; i < scripts.length; i++) {
-            var code = scripts[i];
+            var code = scripts[i].textContent || '';
             var start = code.indexOf('RalodePlayer.init(');
             if (start < 0) continue;
             var tail = code.slice(start + 'RalodePlayer.init('.length);
@@ -139,9 +134,14 @@
                     for (var e = 0; e < (groups[p] || []).length; e++) {
                         var item = groups[p][e] || {};
                         var codeValue = String(item.code || '');
-                        var match = codeValue.match(/https?:\\/\\/[^"\\s'<>]+/i);
-                        if (match) result.push({
-                            url: absolute(match[0], BASE),
+                        var urlStart = codeValue.indexOf('http');
+                        if (urlStart < 0) continue;
+                        var candidate = codeValue.slice(urlStart).split('\\/').join('/');
+                        var urlEnd = candidate.search(/["'\s<>]/);
+                        if (urlEnd >= 0) candidate = candidate.slice(0, urlEnd);
+                        if (!candidate) continue;
+                        result.push({
+                            url: absolute(candidate, BASE),
                             label: (names[p] || '') + (names[p] ? ' · ' : '') + (item.name || ('Серія ' + (e + 1)))
                         });
                     }
@@ -375,8 +375,16 @@
         }
 
         function loadPlaylist() {
-            var match = String(item.url || '').match(/\\/(\\d+)-/);
-            if (!match) {
+            var segments = String(item.url || '').split('/');
+            var newsId = '';
+            for (var n = 0; n < segments.length; n++) {
+                var dash = segments[n].indexOf('-');
+                if (dash > 0) {
+                    var candidateId = segments[n].slice(0, dash);
+                    if (candidateId && !isNaN(Number(candidateId))) { newsId = candidateId; break; }
+                }
+            }
+            if (!newsId) {
                 status.text('Не вдалося визначити номер публікації AniTube для отримання списку серій.');
                 syncNavigation(false);
                 return;
