@@ -340,7 +340,7 @@
                 'атака титанів': 'Attack on Titan',
                 'клинок що знищує демонів': 'Demon Slayer'
             };
-            var normalized = value.toLowerCase().replace(/ё/g, 'е').replace(/\\s+/g, ' ').trim();
+            var normalized = value.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
             var searchValue = aliases[normalized] || value;
             var url = BASE + 'anime/';
             Lampa.Activity.push({ url: url, title: 'Пошук: ' + value, component: LIST, page: 1, sourceUrl: url, search: searchValue });
