@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.7';
+    var VERSION = '0.2.8';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v027-style';
+    var STYLE = 'anitube-lampa-v028-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -188,6 +188,7 @@
         var alive = true;
 
         scroll.append(root[0]);
+        scroll.minus();
 
         function syncNavigation(focusFirst) {
             if (!alive) return;
@@ -306,6 +307,7 @@
         var title = item.title || 'AniTube';
         root.find('.atl-title').text(title);
         scroll.append(root[0]);
+        scroll.minus();
 
         function syncNavigation(focusFirst) {
             if (!alive) return;
@@ -425,10 +427,6 @@
         }
 
         this.create = function () {
-            addButton('Відкрити сторінку на AniTube', function () {
-                if (Lampa.Browser && Lampa.Browser.open) Lampa.Browser.open(item.url);
-                else showNotice('У цій версії Lampa немає вбудованого браузера. Відкрий AniTube через браузер телевізора.');
-            });
             requestText(net, item.url, function (html) {
                 if (!alive) return;
                 var doc = document.createElement('div');
@@ -456,7 +454,7 @@
                 if (vodUrls.length) {
                     status.text('Сторінку аніме розібрано. Вибери серію нижче. Відтворення буде передано до програвача Lampa.');
                 } else {
-                    status.text('Не знайдено посилань FenixPlay /vod/ у коді сторінки. Автоматичний вибір серій для цього тайтлу поки неможливий; сторінка браузера не відкриватиметься як заміна програвача.');
+                    status.text('У завантаженому HTML сторінки не знайдено прямих посилань FenixPlay. Список серій може формуватися окремим запитом AniTube під час роботи сайту; цей спосіб отримання серій ще не реалізовано.');
                 }
                 syncNavigation(true);
             }, function (message) {
