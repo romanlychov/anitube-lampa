@@ -2,11 +2,11 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.3';
+    var VERSION = '0.2.4';
     var BASE = 'https://anitube.in.ua/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v023-style';
+    var STYLE = 'anitube-lampa-v024-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -213,6 +213,20 @@
                     Lampa.Controller.collectionSet(root);
                     Lampa.Controller.collectionFocus(false, root);
                 },
+                left: function () {
+                    if (Navigator.canmove('left')) Navigator.move('left');
+                    else Lampa.Controller.toggle('menu');
+                },
+                right: function () {
+                    Navigator.move('right');
+                },
+                up: function () {
+                    if (Navigator.canmove('up')) Navigator.move('up');
+                    else Lampa.Controller.toggle('head');
+                },
+                down: function () {
+                    Navigator.move('down');
+                },
                 back: function () { Lampa.Activity.backward(); }
             });
             Lampa.Controller.toggle('content');
@@ -252,6 +266,20 @@
                 toggle: function () {
                     Lampa.Controller.collectionSet(root);
                     Lampa.Controller.collectionFocus(false, root);
+                },
+                left: function () {
+                    if (Navigator.canmove('left')) Navigator.move('left');
+                    else Lampa.Controller.toggle('menu');
+                },
+                right: function () {
+                    Navigator.move('right');
+                },
+                up: function () {
+                    if (Navigator.canmove('up')) Navigator.move('up');
+                    else Lampa.Controller.toggle('head');
+                },
+                down: function () {
+                    Navigator.move('down');
                 },
                 back: function () { Lampa.Activity.backward(); }
             });
