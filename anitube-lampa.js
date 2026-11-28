@@ -685,7 +685,7 @@
             playerMark.hide();
             playerCaption.hide();
             playerScreen.css({ display: 'block', padding: 0 });
-            var frame = $('<iframe class="atl-player-frame" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
+            var frame = $('<iframe class="atl-player-frame selector" tabindex="0" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
             frame.attr('src', url);
             playerScreen.append(frame);
             playerStatus.text('Відкрито вбудований плеєр FenixPlay. Якщо запит до API з Lampa заблокований, озвучення та субтитри можна вибрати у меню самого відеоплеєра.');
@@ -696,7 +696,7 @@
             playerMark.hide();
             playerCaption.hide();
             playerScreen.css({ display: 'block', padding: 0 });
-            var frame = $('<iframe class="atl-player-frame atl-anitube-frame" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
+            var frame = $('<iframe class="atl-player-frame atl-anitube-frame selector" tabindex="0" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
             frame.attr('src', item.url);
             playerScreen.append(frame);
             playerStatus.text('Вбудовано сторінку AniTube. Її власний плеєр і список озвучень завантажуються всередині цього вікна; керування доступне в самому вікні.');
