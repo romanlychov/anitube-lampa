@@ -2,12 +2,13 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.20';
+    var VERSION = '0.2.21';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0220-style';
+    var PLAYER = 'anitube_lampa_player';
+    var STYLE = 'anitube-lampa-v0221-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -51,6 +52,9 @@
             + '.atl-player-caption{font-size:1.05em;padding:.6em;}'
             + '.atl-player-frame{display:block;width:100%;height:28em;border:0;background:#000;}'
             + '.atl-player-frame.atl-anitube-frame{height:52em;background:#101722;}'
+            + '.atl-open-player{display:block;width:100%;padding:1.1em;text-align:left;background:#152b39;border:1px solid #20aeb2;border-radius:.45em;color:#fff;font-size:1.05em;}'
+            + '.atl-full-player{position:absolute;inset:0;width:100%;height:100%;background:#000;}'
+            + '.atl-full-player iframe{display:block;width:100%;height:100%;min-height:100vh;border:0;background:#000;}'
             + '.atl-player-heading{font-size:1.15em;font-weight:600;margin-bottom:.6em;}'
 
             + '.atl-player-status{padding-top:.65em;color:#aebdca;font-size:.9em;line-height:1.45;}'
@@ -104,7 +108,9 @@
                 if (!raw || /^(?:data:|blob:|javascript:)/i.test(raw)) return '';
                 var url = absolute(raw, BASE);
                 if (!url || !/^https?:\/\//i.test(url)) return '';
-                if (/(?:spacer|blank|pixel|transparent|placeholder|no[-_]?image|avatar|\/logo(?:[._/-]|$))/i.test(url)) return '';
+                if (!/^https?:\/\/anitube\.in\.ua\//i.test(url)) return '';
+                if (!/\/uploads\/(?:mini\/)?full-news-poster\//i.test(url)) return '';
+                if (!/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(url)) return '';
                 return url;
             }
             var attrs = ['data-original','data-src','data-lazy-src','data-original-src','data-image','data-thumb','data-fallback-src','src'];
@@ -419,21 +425,27 @@
             syncNavigation(false);
         }
         function detailPoster(html, pageUrl) {
-            var doc = document.createElement('div'); doc.innerHTML = html;
-            var selectors = ['meta[property="og:image"]','meta[name="twitter:image"]','meta[property="og:image:secure_url"]','meta[itemprop="image"]'];
-            for (var m = 0; m < selectors.length; m++) {
-                var meta = doc.querySelector(selectors[m]), content = meta && meta.getAttribute('content');
-                var url = content ? absolute(content, pageUrl) : '';
-                if (url && /^https?:\/\//i.test(url)) return url;
+            var doc = document.createElement('div');
+            doc.innerHTML = html;
+            function accepted(raw) {
+                var url = absolute(String(raw || '').replace(/&amp;/g, '&'), pageUrl);
+                if (!url || !/^https?:\/\/anitube\.in\.ua\//i.test(url)) return '';
+                if (!/\/uploads\/(?:mini\/)?full-news-poster\//i.test(url)) return '';
+                if (!/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(url)) return '';
+                return url;
             }
-            var imageSelectors = ['#dle-content .fullstory img','#dle-content .full-story img','#dle-content .story_c_text img','#dle-content article img','#dle-content img[itemprop="image"]','#dle-content img'];
-            for (var i = 0; i < imageSelectors.length; i++) {
-                var images = doc.querySelectorAll(imageSelectors[i]);
-                for (var j = 0; j < images.length; j++) {
-                    var node = images[j], raw = node.getAttribute('data-original') || node.getAttribute('data-src') || node.getAttribute('data-lazy-src') || node.getAttribute('src');
-                    var image = absolute(raw, pageUrl);
-                    if (image && /^https?:\/\//i.test(image) && !/(?:spacer|blank|pixel|transparent|placeholder|no[-_]?image|avatar|logo)/i.test(image)) return image;
-                }
+            var links = doc.querySelectorAll('a[href*="/uploads/mini/full-news-poster/"], a[href*="/uploads/full-news-poster/"]');
+            for (var i = 0; i < links.length; i++) {
+                var linked = accepted(links[i].getAttribute('href'));
+                if (linked) return linked;
+            }
+            var images = doc.querySelectorAll('#dle-content img, #dle-content [data-original], #dle-content [data-src]');
+            for (var j = 0; j < images.length; j++) {
+                var node = images[j];
+                var raw = node.getAttribute('data-original') || node.getAttribute('data-src') ||
+                    node.getAttribute('data-lazy-src') || node.getAttribute('src');
+                var image = accepted(raw);
+                if (image) return image;
             }
             return '';
         }
@@ -595,12 +607,19 @@
 
         function showAniTubeFrame() {
             playerScreen.empty().css({display:'block',padding:0});
-            var frame = $('<iframe class="atl-player-frame atl-anitube-frame selector" tabindex="0" title="Оригінальний плеєр AniTube" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen scrolling="yes"></iframe>');
-            frame.attr('src', item.url);
-            playerScreen.append(frame);
-            frame.on('hover:focus', function () { focusScroll(this); });
-            frame.on('hover:enter click', function () { try { frame[0].contentWindow.focus(); } catch (e) {} });
-            playerStatus.text('Сторінка AniTube відкрита у вбудованому вікні. Серії та озвучення вибираються всередині оригінального плеєра сайту.');
+            var button = $('<button type="button" class="atl-open-player selector">Відкрити оригінальний плеєр AniTube на весь екран</button>');
+            button.on('hover:focus', function () { focusScroll(this); });
+            button.on('hover:enter click', function () {
+                Lampa.Activity.push({
+                    url: item.url,
+                    title: title + ' · Плеєр AniTube',
+                    component: PLAYER,
+                    iframeUrl: item.url,
+                    movie: object.movie || null
+                });
+            });
+            playerScreen.append(button);
+            playerStatus.text('Плеєр відкривається окремим повноекранним екраном, щоб не губитися в прокручуванні сторінки деталей. Керування всередині сайту залежить від підтримки iframe телевізором.');
         }
 
         function addRelatedSeasons(html) {
@@ -717,22 +736,46 @@
                 var doc = document.createElement('div');
                 doc.innerHTML = html;
                 var pageTitle = doc.querySelector('#dle-content h1, #dle-content h2[itemprop="name"], h1[itemprop="name"], h1');
-                var image = doc.querySelector('#dle-content .fullstory img, #dle-content .full-story img, #dle-content .fullstory img, #dle-content article img');
-                var text = doc.querySelector('#dle-content .fullstory, #dle-content .full-story, #dle-content .story_c_text, .fullstory, .full-story');
-                if (image) { var detailImageUrl = image.getAttribute('data-original') || image.getAttribute('data-src') || image.getAttribute('data-lazy-src') || image.getAttribute('src'); if (detailImageUrl && !/spacer\\.gif/i.test(detailImageUrl)) root.find('.atl-title').before($('<img>').attr('src', absolute(detailImageUrl, item.url))); }
+                var detailPosterUrl = detailPoster(html, item.url);
+                if (detailPosterUrl) root.find('.atl-title').before($('<img class="atl-detail-poster">').attr('src', detailPosterUrl));
+                var text = doc.querySelector('#dle-content .story_c_text, #dle-content .fullstory, #dle-content .full-story');
                 if (pageTitle && pageTitle.textContent.trim()) {
                     title = cleanTitle(pageTitle.getAttribute('title') || pageTitle.textContent);
                     root.find('.atl-title').text(title);
                 }
-                if (text) {
-                    var clean = text.cloneNode(true);
-                    var junk = clean.querySelectorAll('script,style,noscript,iframe,svg,form,button,.story_infa,.rating,.rate,.comments,.related,.related-news,.similar');
-                    for (var j = 0; j < junk.length; j++) junk[j].parentNode.removeChild(junk[j]);
-                    root.find('.atl-meta').text(clean.textContent.replace(/\s+/g, ' ').trim().slice(0, 1800));
+                var description = '';
+                var headings = doc.querySelectorAll('#dle-content h1, #dle-content h2, #dle-content h3');
+                for (var h = 0; h < headings.length && !description; h++) {
+                    if (!/^дивитися\s+/i.test((headings[h].textContent || '').replace(/\s+/g, ' ').trim())) continue;
+                    var scope = headings[h].parentNode;
+                    for (var depth = 0; depth < 3 && scope && !description; depth++, scope = scope.parentNode) {
+                        if (!scope.querySelectorAll) continue;
+                        var paragraphs = scope.querySelectorAll('p'), parts = [];
+                        for (var p = 0; p < paragraphs.length; p++) {
+                            var value = (paragraphs[p].textContent || '').replace(/\s+/g, ' ').trim();
+                            if (value.length < 35 || value.length > 1600) continue;
+                            if (/(?:function\s*\(|var\s+[A-Za-z_$]|const\s+[A-Za-z_$]|<script|document\.|window\.)/i.test(value)) continue;
+                            if (parts.indexOf(value) < 0) parts.push(value);
+                        }
+                        if (parts.length) description = parts.join(' ');
+                    }
                 }
+                if (!description && text) {
+                    var clean = text.cloneNode(true);
+                    var junk = clean.querySelectorAll('script,style,noscript,iframe,video,source,svg,form,button,pre,code,.story_infa,.rating,.rate,.comments,.related,.related-news,.similar');
+                    for (var j = 0; j < junk.length; j++) if (junk[j].parentNode) junk[j].parentNode.removeChild(junk[j]);
+                    var paragraphsFallback = clean.querySelectorAll('p'), fallbackParts = [];
+                    for (var q = 0; q < paragraphsFallback.length; q++) {
+                        var fallbackText = (paragraphsFallback[q].textContent || '').replace(/\s+/g, ' ').trim();
+                        if (fallbackText.length >= 35 && fallbackText.length <= 1600 &&
+                            !/(?:function\s*\(|var\s+[A-Za-z_$]|const\s+[A-Za-z_$]|document\.|window\.)/i.test(fallbackText)) {
+                            fallbackParts.push(fallbackText);
+                        }
+                    }
+                    description = fallbackParts.join(' ');
+                }
+                root.find('.atl-meta').text(description.slice(0, 1800));
 
-                // Відкриваємо оригінальну сторінку AniTube у нижньому вікні одразу.
-                // Пов'язані сезони/частини на сторінках AniTube подані окремими посиланнями.
                 addRelatedSeasons(html);
                 showAniTubeFrame();
 
@@ -761,6 +804,21 @@
         this.stop = function () {};
         this.render = function () { return scroll.render(true); };
         this.destroy = function () { alive = false; net.clear(); relatedNet.clear(); scroll.destroy(); root.remove(); };
+    }
+
+    function PlayerScreen(object) {
+        var root = $('<div class="atl-full-player"><iframe class="selector" tabindex="0" title="Плеєр AniTube" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen scrolling="yes"></iframe></div>');
+        var frame = root.find('iframe');
+        var url = String(object.iframeUrl || object.url || '');
+        this.create = function () { frame.attr('src', url); return root; };
+        this.start = function () {
+            Lampa.Controller.collectionSet(root);
+            try { frame[0].contentWindow.focus(); } catch (e) {}
+            frame.trigger('hover:focus');
+        };
+        this.stop = function () {};
+        this.render = function () { return root; };
+        this.destroy = function () { frame.attr('src', 'about:blank'); root.remove(); };
     }
 
     function addMenu() {
@@ -801,6 +859,7 @@
         addStyle();
         if (!Lampa.Component.get(LIST)) Lampa.Component.add(LIST, ListScreen);
         if (!Lampa.Component.get(DETAIL)) Lampa.Component.add(DETAIL, DetailScreen);
+        if (!Lampa.Component.get(PLAYER)) Lampa.Component.add(PLAYER, PlayerScreen);
         registerManifest();
         addMenu();
         Lampa.Listener.follow('menu', function (event) { if (event.type === 'open') addMenu(); });
