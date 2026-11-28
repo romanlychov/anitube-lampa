@@ -325,9 +325,11 @@
                     more.on('hover:focus', function () { focusScroll(this); });
                     more.on('hover:enter click', function () { load(nextUrl); });
                     root.find('.atl-actions').append(more);
-                } else if (!query && /\/page\/(\d+)\//.test(url)) {
+                } else if (!query && (url === BASE || /\/page\/(\d+)\//.test(url))) {
                     var pageMatch = url.match(/\/page\/(\d+)\//);
-                    var nextPageUrl = url.replace(/\/page\/\d+\//, '/page/' + (Number(pageMatch[1]) + 1) + '/');
+                    var nextPageUrl = url === BASE
+                        ? BASE + 'f/sort=date/order=desc/page/2/'
+                        : url.replace(/\/page\/\d+\//, '/page/' + (Number(pageMatch[1]) + 1) + '/');
                     var moreFallback = $('<button type="button" class="atl-button selector">Наступна сторінка</button>');
                     moreFallback.on('hover:focus', function () { focusScroll(this); });
                     moreFallback.on('hover:enter click', function () { load(nextPageUrl); });
