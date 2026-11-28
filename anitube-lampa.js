@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.15';
+    var VERSION = '0.2.16';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0215-style';
+    var STYLE = 'anitube-lampa-v0216-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -58,7 +58,7 @@
             success(String(data || ''));
         }, function (xhr, error) {
             var message = network.errorDecode ? network.errorDecode(xhr, error) : 'Помилка мережі';
-            failure(message || 'Не вдалося завантажити сторінку');
+            failure(message || 'Не вдалося завантажити сторінку', xhr || null);
         }, postData || null, options);
     }
 
@@ -83,48 +83,89 @@
     }
 
     function parseCards(html) {
-        var doc = document.createElement('div'); doc.innerHTML = html;
+        var doc = document.createElement('div');
+        doc.innerHTML = html;
         var found = [], seen = {};
+
+        function usableImage(value) {
+            var url = absolute(value, BASE);
+            if (!url) return '';
+            if (/(?:spacer|blank|pixel|transparent|no[-_]?image|logo|avatar|icon)\.(?:gif|png|jpe?g|webp)(?:$|[?#])/i.test(url)) return '';
+            if (!/^https?:\/\//i.test(url)) return '';
+            return url;
+        }
+
+        function imageFromScope(scope) {
+            if (!scope || !scope.querySelectorAll) return '';
+            var images = scope.querySelectorAll('img');
+            for (var i = 0; i < images.length; i++) {
+                var img = images[i];
+                var values = [
+                    img.getAttribute('data-original'),
+                    img.getAttribute('data-src'),
+                    img.getAttribute('data-lazy-src'),
+                    img.getAttribute('data-original-src'),
+                    img.getAttribute('data-image'),
+                    img.getAttribute('data-srcset'),
+                    img.getAttribute('srcset'),
+                    img.getAttribute('src')
+                ];
+                for (var v = 0; v < values.length; v++) {
+                    var raw = String(values[v] || '').trim();
+                    if (!raw) continue;
+                    if (raw.indexOf(',') >= 0) raw = raw.split(',')[0].trim();
+                    raw = raw.split(/\s+/)[0];
+                    var candidate = usableImage(raw);
+                    if (candidate) return candidate;
+                }
+            }
+            var links = scope.querySelectorAll('a[href]');
+            for (var j = 0; j < links.length; j++) {
+                var href = links[j].getAttribute('href') || '';
+                if (/\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(href)) {
+                    var linkedImage = usableImage(href);
+                    if (linkedImage) return linkedImage;
+                }
+            }
+            return '';
+        }
+
+        function cardScope(link, supplied) {
+            if (supplied) return supplied;
+            var parent = link.parentNode;
+            for (var depth = 0; parent && depth < 6; depth++, parent = parent.parentNode) {
+                if (!parent.querySelector || !parent.querySelector('img')) continue;
+                var links = parent.querySelectorAll('a[href*=".html"]');
+                var className = String(parent.className || '');
+                var semantic = /story|shortstory|news|anime|item/i.test(className) ||
+                    String(parent.tagName || '').toLowerCase() === 'article';
+                // Важливо: беремо найближчий контейнер картки й не піднімаємося
+                // до спільної обгортки каталогу з постерами інших тайтлів.
+                if (semantic || links.length <= 3) return parent;
+            }
+            return null;
+        }
+
         function add(link, container) {
             if (!link) return;
             var href = absolute(link.getAttribute('href') || '', BASE);
-            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) return;
+            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) ||
+                !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) return;
+
             var heading = link.querySelector('h2,h3,h4,[itemprop="name"]');
             var title = cleanTitle(link.getAttribute('title') || (heading && heading.textContent) || link.textContent || '');
             if (!title || title.length < 2 || title.length > 180) return;
-            var scope = container || null;
-            if (!scope) {
-                var parent = link.parentNode;
-                for (var depth = 0; parent && depth < 8; depth++, parent = parent.parentNode) {
-                    if (parent.querySelector && parent.querySelector('img')) {
-                        scope = parent;
-                        var cls = String(parent.className || '');
-                        if (/story|shortstory|news|anime|item/i.test(cls) || String(parent.tagName || '').toLowerCase() === 'article') break;
-                    }
-                }
-            }
-            var poster = scope && scope.querySelector ? scope.querySelector('span.story_post img, .story_post img, img') : link.querySelector('img');
-            var raw = '';
-            if (poster) {
-                raw = poster.getAttribute('data-original') || poster.getAttribute('data-src') ||
-                    poster.getAttribute('data-lazy-src') || poster.getAttribute('data-original-src') ||
-                    poster.getAttribute('data-image') || poster.getAttribute('data-srcset') ||
-                    poster.getAttribute('srcset') || poster.getAttribute('src') || '';
-                if (raw.indexOf(',') >= 0) raw = raw.split(',')[0].trim().split(/\s+/)[0];
-            }
-            var image = raw ? absolute(raw, BASE) : '';
-            if (image && /(?:spacer|blank|pixel|transparent|logo|avatar|icon)\.(?:gif|png|jpe?g|webp)(?:$|[?#])/i.test(image)) image = '';
-            if (!image && scope && scope.querySelectorAll) {
-                var imageLinks = scope.querySelectorAll('a[href]');
-                for (var il = 0; il < imageLinks.length; il++) {
-                    var candidateImage = absolute(imageLinks[il].getAttribute('href') || '', BASE);
-                    if (/\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(candidateImage)) { image = candidateImage; break; }
-                }
-            }
-            seen[href] = true; found.push({ title: title, url: href, image: image });
+
+            var scope = cardScope(link, container);
+            var image = imageFromScope(scope);
+            seen[href] = true;
+            found.push({ title: title, url: href, image: image });
         }
+
         var articles = doc.querySelectorAll('#dle-content article.story, article.story');
-        for (var i = 0; i < articles.length; i++) add(articles[i].querySelector('h2[itemprop="name"] a[href], h2 a[href], h3 a[href], a[href*=".html"]'), articles[i]);
+        for (var i = 0; i < articles.length; i++) {
+            add(articles[i].querySelector('h2[itemprop="name"] a[href], h2 a[href], h3 a[href], a[href*=".html"]'), articles[i]);
+        }
         if (!found.length) {
             var links = doc.querySelectorAll('#dle-content a[href], .content a[href], main a[href], a[href]');
             for (var j = 0; j < links.length; j++) add(links[j], null);
@@ -633,16 +674,18 @@
                     status.text('AniTube не повернув розпізнаваних пунктів плейлиста. Можливо, список формується іншим запитом або потребує додаткових параметрів.');
                 }
                 syncNavigation(true);
-            }, function (message) {
+            }, function (message, xhr) {
                 if (!alive) return;
                 var fallback = parseLegacyPlaylist(htmlCache);
                 if (!fallback.length) fallback = parseEmbeddedPlaylist(htmlCache);
                 fallback.forEach(function (entry) { addEpisode(entry.url, entry.label); });
+                var httpStatus = xhr && (xhr.status || xhr.statusCode) ? 'HTTP ' + (xhr.status || xhr.statusCode) : '';
+                var responseHint = xhr && xhr.responseText ? String(xhr.responseText).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140) : '';
                 status.text(vodUrls.length
                     ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
-                    : 'Не вдалося отримати плейлист AniTube: ' + message);
+                    : 'Не вдалося отримати плейлист AniTube' + (httpStatus ? ' (' + httpStatus + ')' : '') + ': ' + message + (responseHint ? ' — ' + responseHint : ''));
                 syncNavigation(true);
-            }, { 'Referer': BASE, 'X-Requested-With': 'XMLHttpRequest', 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
+            }, { 'Referer': item.url, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
         }
 
         function playEpisode(data, episodeTitle) {
