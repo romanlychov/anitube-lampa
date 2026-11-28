@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.18';
+    var VERSION = '0.2.19';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0218-style';
+    var STYLE = 'anitube-lampa-v0219-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -97,137 +97,93 @@
         var doc = document.createElement('div');
         doc.innerHTML = html;
         var found = [], seen = {};
-        function getImage(node) {
+        function imageUrl(node) {
             if (!node) return '';
             function valid(raw) {
-                var url = absolute(String(raw || '').trim().replace(/^url\(["']?|["']?\)$/g, ''), BASE);
-                return url && /^https?:\/\//i.test(url) && !/(spacer|blank|pixel|transparent|logo|avatar|icon|placeholder)/i.test(url) ? url : '';
+                raw = String(raw || '').trim().replace(/^url\(["']?|["']?\)$/g, '');
+                if (!raw || /^(?:data:|blob:|javascript:)/i.test(raw)) return '';
+                var url = absolute(raw, BASE);
+                if (!url || !/^https?:\/\//i.test(url)) return '';
+                if (/(?:spacer|blank|pixel|transparent|placeholder|no[-_]?image|avatar|\/logo(?:[._/-]|$))/i.test(url)) return '';
+                return url;
             }
-            function fromSet(value) {
-                var parts = String(value || '').split(','), best = '', bestSize = -1;
-                for (var s = 0; s < parts.length; s++) {
-                    var bits = parts[s].trim().split(/\s+/);
-                    var candidate = valid(bits[0]);
-                    if (!candidate) continue;
-                    var size = bits[1] ? (parseFloat(bits[1]) * (/x$/i.test(bits[1]) ? 1000 : 1)) : s;
-                    if (size >= bestSize) { best = candidate; bestSize = size; }
-                }
-                return best;
-            }
-            var attrs = ['data-original','data-src','data-lazy-src','data-original-src','data-image','data-thumb','data-bg','data-fallback-src','src'];
+            var attrs = ['data-original','data-src','data-lazy-src','data-original-src','data-image','data-thumb','data-fallback-src','src'];
             for (var i = 0; i < attrs.length; i++) {
-                var raw = String(node.getAttribute(attrs[i]) || '').trim();
-                if (!raw) continue;
-                var found = valid(raw);
-                if (found) return found;
+                var value = valid(node.getAttribute(attrs[i]));
+                if (value) return value;
             }
             var sets = ['data-srcset','data-lazy-srcset','data-original-srcset','srcset'];
             for (var j = 0; j < sets.length; j++) {
-                var setUrl = fromSet(node.getAttribute(sets[j]));
-                if (setUrl) return setUrl;
+                var set = String(node.getAttribute(sets[j]) || '').split(',');
+                var best = '';
+                for (var k = 0; k < set.length; k++) {
+                    var candidate = valid(set[k].trim().split(/\s+/)[0]);
+                    if (candidate) best = candidate;
+                }
+                if (best) return best;
             }
-            var style = node.getAttribute('style') || '';
+            var style = String(node.getAttribute('style') || '');
             var match = style.match(/background-image\s*:\s*url\(["']?([^"')]+)["']?\)/i);
-            if (match) {
-                var bg = valid(match[1]);
-                if (bg) return bg;
+            return match ? valid(match[1]) : '';
+        }
+        function posterFor(article, link) {
+            var preferred = article.querySelector('.story_post, [class*="story_post"], .poster, .cover');
+            var scopes = [];
+            if (preferred) scopes.push(preferred);
+            if (link && link.querySelector) scopes.push(link);
+            scopes.push(article);
+            for (var s = 0; s < scopes.length; s++) {
+                var nodes = scopes[s].querySelectorAll('img, source, [style*="background-image"]');
+                for (var n = 0; n < nodes.length; n++) {
+                    var url = imageUrl(nodes[n]);
+                    if (url) return url;
+                }
             }
             return '';
         }
-        function findPoster(scope, href, title) {
-            if (!scope || !scope.querySelectorAll) return '';
-            var nodes = scope.querySelectorAll('img,source[srcset],[style*="background-image"]');
-            var best = '', rankBest = 0;
-            for (var i = 0; i < nodes.length; i++) {
-                var node = nodes[i], parent = node, rank = 0;
-                while (parent && parent !== scope) {
-                    var tag = String(parent.tagName || '').toLowerCase();
-                    if (tag === 'a') {
-                        if (absolute(parent.getAttribute('href') || '', BASE) === href) rank = Math.max(rank, 4);
-                        break;
-                    }
-                    if (/(^|\s)(story_post|poster|cover|shortstory-image|shortstory|story|anime-card|anime_item)(\s|$)/i.test(String(parent.className || ''))) rank = Math.max(rank, 3);
-                    parent = parent.parentNode;
-                }
-                var alt = String(node.getAttribute('alt') || node.getAttribute('title') || '').toLowerCase();
-                var t = String(title || '').toLowerCase();
-                if (alt && t && (t.indexOf(alt) >= 0 || alt.indexOf(t) >= 0)) rank = Math.max(rank, 2);
-                // У картці головної сторінки постер часто є сусідом заголовка,
-                // а не вкладений у те саме посилання; межа article/card уже надійна.
-                if (rank < 2 && scope && /^(article|div|li)$/i.test(String(scope.tagName || '')) &&
-                    /story|shortstory|anime|poster|card/i.test(String(scope.className || ''))) rank = 1;
-                if (rank < 1) continue;
-                var url = getImage(node);
-                if (url && rank > rankBest) { best = url; rankBest = rank; }
-            }
-            return best;
-        }
-        function add(link, container) {
-            if (!link) return;
+        // Фактична структура AniTube/DLE: один article.story на кожен тайтл.
+        var articles = doc.querySelectorAll('#dle-content article.story, article.story');
+        for (var a = 0; a < articles.length; a++) {
+            var article = articles[a];
+            var link = article.querySelector('h2[itemprop="name"] a[href], h2 a[href], a[href*=".html"]');
+            if (!link) continue;
             var href = absolute(link.getAttribute('href') || '', BASE);
-            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) return;
-            var heading = link.querySelector('h2,h3,h4,[itemprop="name"]');
-            var title = cleanTitle(link.getAttribute('title') || (heading && heading.textContent) || link.textContent || '');
-            if (!title || title.length < 2 || title.length > 180) return;
-            var scope = container;
-            if (!scope) {
-                var parent = link.parentNode;
-                for (var depth = 0; parent && depth < 5; depth++, parent = parent.parentNode) {
-                    if (!parent.querySelector || !parent.querySelector('img,[style*="background-image"]')) continue;
-                    var count = parent.querySelectorAll('a[href*=".html"]').length;
-                    var cls = String(parent.className || '');
-                    if (/story|shortstory|news|anime|item/i.test(cls) || String(parent.tagName || '').toLowerCase() === 'article' || count <= 2) { scope = parent; break; }
-                }
-            }
-            var image = findPoster(scope, href, title);
-            // Не відкидаємо однакові адреси зображень: сайт може законно
-            // використовувати одне зображення для кількох пов'язаних публікацій.
+            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) ||
+                !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) continue;
+            var heading = article.querySelector('h2[itemprop="name"]') || article.querySelector('h2,h3,h4');
+            var title = cleanTitle((heading && heading.textContent) || link.getAttribute('title') || link.textContent || '');
+            if (!title || title.length < 2 || title.length > 180) continue;
+            var image = posterFor(article, link);
             seen[href] = true;
             found.push({ title: title, url: href, image: image });
         }
-        // На головній AniTube різні блоки каталогу можуть мати різні класи карток.
-        // Тому збираємо посилання на публікації, а контейнер картки визначаємо окремо.
-        var links = doc.querySelectorAll('#dle-content a[href*=".html"], article.story a[href*=".html"], .shortstory a[href*=".html"], .content a[href*=".html"], main a[href*=".html"]');
-        for (var i = 0; i < links.length; i++) add(links[i], null);
+        // Резерв для старого шаблону, якщо article.story відсутні.
         if (!found.length) {
-            var fallbackLinks = doc.querySelectorAll('a[href*=".html"]');
-            for (var j = 0; j < fallbackLinks.length; j++) add(fallbackLinks[j], null);
+            var links = doc.querySelectorAll('#dle-content a[href*=".html"], a[href*=".html"]');
+            for (var l = 0; l < links.length; l++) {
+                var itemLink = links[l];
+                var itemHref = absolute(itemLink.getAttribute('href') || '', BASE);
+                if (!itemHref || !/^https?:\/\/anitube\.in\.ua\//i.test(itemHref) ||
+                    !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(itemHref) || seen[itemHref]) continue;
+                var itemTitle = cleanTitle(itemLink.getAttribute('title') || itemLink.textContent || '');
+                if (!itemTitle || itemTitle.length < 2 || itemTitle.length > 180) continue;
+                var scope = itemLink;
+                for (var depth = 0; depth < 4 && scope.parentNode; depth++) {
+                    scope = scope.parentNode;
+                    if (scope.querySelector && scope.querySelector('.story_post, img')) break;
+                }
+                var itemImage = posterFor(scope, itemLink);
+                seen[itemHref] = true;
+                found.push({ title: itemTitle, url: itemHref, image: itemImage });
+            }
         }
         return found;
     }
 
     function preloadPosters(items, callback) {
-        var queue = [];
-        items.forEach(function (item) { if (item.image) queue.push(item); });
-        if (!queue.length) { callback(); return; }
-        var next = 0, active = 0, done = 0, maxActive = 6;
-        function pump() {
-            while (active < maxActive && next < queue.length) {
-                (function (item) {
-                    active++;
-                    var probe = new Image(), finished = false;
-                    function finish(ok) {
-                        if (finished) return;
-                        finished = true;
-                        active--;
-                        done++;
-                        if (!ok) item.image = '';
-                        if (done === queue.length) callback();
-                        else pump();
-                    }
-                    probe.onload = function () {
-                        if (probe.decode) {
-                            try { probe.decode().then(function () { finish(true); }, function () { finish(true); }); }
-                            catch (e) { finish(true); }
-                        } else finish(true);
-                    };
-                    probe.onerror = function () { finish(false); };
-                    probe.src = item.image;
-                    setTimeout(function () { finish(false); }, 10000);
-                }(queue[next++]));
-            }
-        }
-        pump();
+        // Не робимо окремих перевірочних Image()-запитів: відмова такого запиту
+        // не повинна очищати адресу постера. Завантажує саме елемент картки.
+        callback();
     }
 
     function parsePlaylist(raw) {
@@ -699,6 +655,9 @@
             var frame = $('<iframe class="atl-player-frame atl-anitube-frame selector" tabindex="0" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>');
             frame.attr('src', item.url);
             playerScreen.append(frame);
+            frame.on('hover:enter click', function () {
+                try { frame[0].contentWindow.focus(); } catch (e) {}
+            });
             playerStatus.text('Вбудовано сторінку AniTube. Її власний плеєр і список озвучень завантажуються всередині цього вікна; керування доступне в самому вікні.');
         }
 
@@ -1020,6 +979,9 @@
                     for (var j = 0; j < junk.length; j++) junk[j].parentNode.removeChild(junk[j]);
                     root.find('.atl-meta').text(clean.textContent.replace(/\s+/g, ' ').trim().slice(0, 1800));
                 }
+
+                // Відкриваємо оригінальну сторінку AniTube у нижньому вікні одразу.
+                showAniTubeFrame();
 
                 // Пов'язані сезони/частини на сторінках AniTube подані окремими посиланнями.
                 addRelatedSeasons(html);
