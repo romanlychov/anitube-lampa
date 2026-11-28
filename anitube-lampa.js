@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.10';
+    var VERSION = '0.2.11';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0210-style';
+    var STYLE = 'anitube-lampa-v0211-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -62,6 +62,14 @@
         }, postData || null, options);
     }
 
+    function cleanTitle(value) {
+        return String(value || '')
+            .replace(/\s+/g, ' ')
+            .replace(/\s+(?:D\+S|Рік випуску аніме:|Рік виходу аніме:|Серій:|Жанр:|Переклад:|Ролі озвучували:)[\s\S]*$/i, '')
+            .replace(/^\s*[|·–—-]+\s*|\s*[|·–—-]+\s*$/g, '')
+            .trim();
+    }
+
     function parseCards(html) {
         var doc = document.createElement('div');
         doc.innerHTML = html;
@@ -73,7 +81,7 @@
             var titleLink = article.querySelector('h2[itemprop="name"] a[href]');
             if (!titleLink) continue;
             var href = absolute(titleLink.getAttribute('href'));
-            var title = (titleLink.textContent || titleLink.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+            var title = cleanTitle(titleLink.getAttribute('title') || titleLink.textContent || '');
             if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\.html(?:$|[?#])/i.test(href) || title.length < 2) continue;
             if (seen[href]) continue;
             var poster = article.querySelector('span.story_post img, .story_post img');
@@ -117,43 +125,66 @@
     }
 
     function parseLegacyPlaylist(html) {
+        var result = [];
+
+        function parseCall(code) {
+            var marker = code.indexOf('RalodePlayer.init(');
+            if (marker < 0) return [];
+            var open = marker + 'RalodePlayer.init('.length;
+            var depth = 1;
+            var quote = '';
+            var escaped = false;
+            var end = -1;
+            for (var i = open; i < code.length; i++) {
+                var ch = code.charAt(i);
+                if (quote) {
+                    if (escaped) escaped = false;
+                    else if (ch === '\\') escaped = true;
+                    else if (ch === quote) quote = '';
+                    continue;
+                }
+                if (ch === '"' || ch === "'") { quote = ch; continue; }
+                if (ch === '(') depth++;
+                else if (ch === ')') {
+                    depth--;
+                    if (depth === 0) { end = i; break; }
+                }
+            }
+            if (end < 0) return [];
+            var args;
+            try { args = JSON.parse('[' + code.slice(open, end) + ']'); }
+            catch (e) { return []; }
+            var names = args[0] || [];
+            var groups = args[1] || [];
+            var items = [];
+            for (var p = 0; p < groups.length; p++) {
+                for (var e = 0; e < (groups[p] || []).length; e++) {
+                    var item = groups[p][e] || {};
+                    var codeValue = String(item.code || '').replace(/\\\//g, '/').replace(/&amp;/g, '&');
+                    var match = codeValue.match(/https?:\/\/[^"'\s<>]+/i);
+                    if (!match) continue;
+                    var candidate = match[0].replace(/[),;]+$/, '');
+                    items.push({
+                        url: absolute(candidate, BASE),
+                        label: cleanTitle((names[p] || '') + (names[p] ? ' · ' : '') + (item.name || ('Серія ' + (e + 1))))
+                    });
+                }
+            }
+            return items;
+        }
+
         var doc = document.createElement('div');
         doc.innerHTML = html;
         var scripts = doc.querySelectorAll('script');
         for (var i = 0; i < scripts.length; i++) {
-            var code = scripts[i].textContent || '';
-            var start = code.indexOf('RalodePlayer.init(');
-            if (start < 0) continue;
-            var tail = code.slice(start + 'RalodePlayer.init('.length);
-            var end = tail.indexOf(');');
-            if (end < 0) continue;
-            try {
-                var args = JSON.parse('[' + tail.slice(0, end) + ']');
-                var names = args[0] || [];
-                var groups = args[1] || [];
-                var result = [];
-                for (var p = 0; p < groups.length; p++) {
-                    for (var e = 0; e < (groups[p] || []).length; e++) {
-                        var item = groups[p][e] || {};
-                        var codeValue = String(item.code || '');
-                        var urlStart = codeValue.indexOf('http');
-                        if (urlStart < 0) continue;
-                        var candidate = codeValue.slice(urlStart).split('\\/').join('/');
-                        var urlEnd = candidate.search(/["'\s<>]/);
-                        if (urlEnd >= 0) candidate = candidate.slice(0, urlEnd);
-                        if (!candidate) continue;
-                        result.push({
-                            url: absolute(candidate, BASE),
-                            label: (names[p] || '') + (names[p] ? ' · ' : '') + (item.name || ('Серія ' + (e + 1)))
-                        });
-                    }
-                }
-                if (result.length) return result;
-            } catch (e) {}
+            var parsed = parseCall(scripts[i].textContent || scripts[i].text || '');
+            if (parsed.length) return parsed;
         }
-        return [];
+        // Деякі шаблони віддають ініціалізацію програвача в сирому HTML поза звичайним script-вузлом.
+        var rawParsed = parseCall(String(html || '').replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
+        if (rawParsed.length) return rawParsed;
+        return result;
     }
-
     function parseNext(html, currentUrl) {
         var doc = document.createElement('div');
         doc.innerHTML = html;
@@ -224,7 +255,7 @@
         var grid = root.find('.atl-grid');
         var status = root.find('.atl-status');
         var query = object.search || '';
-        var currentUrl = object.sourceUrl || (BASE + 'f/sort=date/order=desc/page/1/');
+        var currentUrl = object.sourceUrl || (BASE + 'f//sort=date/order=desc/page/1/');
         var nextUrl = '';
         var alive = true;
 
@@ -300,7 +331,7 @@
         function doSearch(event) {
             if (event && event.preventDefault) event.preventDefault();
             var value = root.find('.atl-query').val().trim();
-            if (!value) { load(BASE); return; }
+            if (!value) { load(BASE + 'f//sort=date/order=desc/page/1/'); return; }
             // Пошук AniTube: POST на /anime/ з параметрами do/subaction/story у query string.
             var aliases = {
                 'ван піс': 'One Piece',
@@ -384,21 +415,36 @@
         function addRelatedSeasons(html) {
             var doc = document.createElement('div');
             doc.innerHTML = html;
-            var rootTitle = String(title || '').replace(/\s*\([^)]*(?:сезон|season|фільм|movie|ova|спецвипуск)[^)]*\)\s*/ig, ' ').replace(/\s+/g, ' ').trim();
-            if (!rootTitle) return;
-            var links = doc.querySelectorAll('a[href]');
+            var baseTitle = cleanTitle(title)
+                .replace(/\s*\([^)]*(?:сезон|season|фільм|movie|ova|спецвипуск)[^)]*\)\s*/ig, ' ')
+                .replace(/\s*[:：-]\s*.+$/, '')
+                .replace(/\s+/g, ' ').trim();
+            if (!baseTitle || baseTitle.length < 4) return;
+
+            var links = doc.querySelectorAll('#dle-content a[href], .related a[href], .related-news a[href], .similar a[href], a[href]');
             var seen = {};
             var added = 0;
             for (var i = 0; i < links.length; i++) {
                 var link = links[i];
-                var label = (link.textContent || link.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
                 var href = absolute(link.getAttribute('href'), item.url);
-                if (!label || !href || href === item.url || !/\.html(?:$|[?#])/i.test(href)) continue;
-                if (!/^https?:\/\/anitube\.in\.ua\//i.test(href)) continue;
-                if (label.toLowerCase().indexOf(rootTitle.toLowerCase()) !== 0) continue;
-                if (seen[href]) continue;
+                if (!href || href === item.url || !/\.html(?:$|[?#])/i.test(href) ||
+                    !/^https?:\/\/anitube\.in\.ua\//i.test(href) || seen[href]) continue;
+
+                var heading = link.querySelector('h2,h3,h4,.title,[itemprop="name"]');
+                var image = link.querySelector('img');
+                var label = cleanTitle(
+                    (heading && heading.textContent) ||
+                    (image && (image.getAttribute('alt') || image.getAttribute('title'))) ||
+                    link.getAttribute('title') ||
+                    link.textContent || ''
+                );
+                if (!label || label.length > 100) continue;
+                if (label.toLowerCase().indexOf(baseTitle.toLowerCase()) !== 0) continue;
+                // Не беремо навігаційні посилання, серії та посилання на профілі/озвучення.
+                if (/^(?:попередня|наступна) серія$/i.test(label)) continue;
+
                 seen[href] = true;
-                var button = $('<button type="button" class="atl-button selector"></button>').text('Тайтл / сезон: ' + label);
+                var button = $('<button type="button" class="atl-button selector"></button>').text(label);
                 button.on('hover:focus', function () { focusScroll(this); });
                 button.on('hover:enter click', (function (seasonUrl, seasonTitle) {
                     return function () {
@@ -420,7 +466,6 @@
                 actions.prepend(heading);
             }
         }
-
         function addEpisode(url, label) {
             if (!url || vodUrls.indexOf(url) >= 0) return;
             vodUrls.push(url);
@@ -578,15 +623,20 @@
                 htmlCache = html;
                 var doc = document.createElement('div');
                 doc.innerHTML = html;
-                var pageTitle = doc.querySelector('h1') || doc.querySelector('.title');
-                var image = doc.querySelector('.fullstory img, .full-story img, .news img, article img');
-                var text = doc.querySelector('.fullstory, .full-story, .news, article');
-                if (image) root.find('.atl-title').before($('<img>').attr('src', absolute(image.getAttribute('src') || image.getAttribute('data-src'), item.url)));
+                var pageTitle = doc.querySelector('#dle-content h1, #dle-content h2[itemprop="name"], h1[itemprop="name"], h1');
+                var image = doc.querySelector('#dle-content .fullstory img, #dle-content .full-story img, #dle-content .fullstory img, #dle-content article img');
+                var text = doc.querySelector('#dle-content .fullstory, #dle-content .full-story, #dle-content .story_c_text, .fullstory, .full-story');
+                if (image) root.find('.atl-title').before($('<img>').attr('src', absolute(image.getAttribute('src') || image.getAttribute('data-src') || image.getAttribute('data-original'), item.url)));
                 if (pageTitle && pageTitle.textContent.trim()) {
-                    title = pageTitle.textContent.trim();
+                    title = cleanTitle(pageTitle.getAttribute('title') || pageTitle.textContent);
                     root.find('.atl-title').text(title);
                 }
-                if (text) root.find('.atl-meta').text(text.textContent.split(/\s+/).join(' ').trim().slice(0, 1800));
+                if (text) {
+                    var clean = text.cloneNode(true);
+                    var junk = clean.querySelectorAll('script,style,noscript,iframe,svg,form,button,.story_infa,.rating,.rate,.comments,.related,.related-news,.similar');
+                    for (var j = 0; j < junk.length; j++) junk[j].parentNode.removeChild(junk[j]);
+                    root.find('.atl-meta').text(clean.textContent.replace(/\s+/g, ' ').trim().slice(0, 1800));
+                }
 
                 // Пов'язані сезони/частини на сторінках AniTube подані окремими посиланнями.
                 addRelatedSeasons(html);
@@ -623,7 +673,7 @@
         if ($('.atl-menu-item').length) return;
         var item = $('<li class="menu__item selector atl-menu-item"><div class="menu__ico"><svg viewBox="0 0 44 44" aria-hidden="true"><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="currentColor" opacity=".13"/><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m18 16 11 6-11 6V16Z" fill="currentColor"/><path d="M13 10.8 22 6l9 4.8M13 33.2l9 4.8 9-4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m33.5 7 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="currentColor"/></svg></div><div class="menu__text">AniTube</div></li>');
         item.on('hover:enter', function () {
-            Lampa.Activity.push({ url: '', title: 'AniTube', component: LIST, page: 1, sourceUrl: BASE });
+            Lampa.Activity.push({ url: '', title: 'AniTube', component: LIST, page: 1, sourceUrl: BASE + 'f//sort=date/order=desc/page/1/' });
         });
         $('.menu .menu__list').eq(0).append(item);
     }
