@@ -382,7 +382,7 @@
                 return;
             }
             status.text('Запитую список серій AniTube…');
-            var playlistUrl = BASE + 'engine/ajax/playlists.php?news_id=' + encodeURIComponent(match[1]) + '&xfield=playlist';
+            var playlistUrl = BASE + 'engine/ajax/playlists.php?news_id=' + encodeURIComponent(newsId) + '&xfield=playlist';
             requestText(net, playlistUrl, function (raw) {
                 if (!alive) return;
                 var list = parsePlaylist(raw);
@@ -493,7 +493,7 @@
                 loadEpisodeApi(payload, vodUrl);
                 return;
             }
-            if (/\\.(m3u8|mp4)(?:$|[?#])/i.test(vodUrl)) {
+            if (/\.(m3u8|mp4)(?:$|[?#])/i.test(vodUrl)) {
                 status.text('Передаю відеопотік до програвача Lampa…');
                 Lampa.Player.play({ url: vodUrl, title: title, quality: 'auto', movie: object.movie || null });
                 return;
@@ -522,7 +522,7 @@
                     title = pageTitle.textContent.trim();
                     root.find('.atl-title').text(title);
                 }
-                if (text) root.find('.atl-meta').text(text.textContent.replace(/\\s+/g, ' ').trim().slice(0, 1800));
+                if (text) root.find('.atl-meta').text(text.textContent.split(/\s+/).join(' ').trim().slice(0, 1800));
 
                 // Основний спосіб AniTube: AJAX playlist endpoint за ID публікації.
                 loadPlaylist();
