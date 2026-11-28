@@ -536,12 +536,21 @@
         var relatedNet = new Lampa.Reguest();
         var item = object.item || { title: object.title, url: object.url };
         var scroll = new Lampa.Scroll({ mask: true, over: true });
-        var root = $('<div class="atl-wrap atl-detail"><div class="atl-title"></div><div class="atl-status">Завантаження інформації…</div><div class="atl-meta"></div><div class="atl-actions"></div><div class="atl-episodes"></div><div class="atl-clear"></div></div>');
+        var root = $('<div class="atl-wrap atl-detail"><div class="atl-title"></div><div class="atl-status">Завантаження інформації…</div><div class="atl-meta"></div><div class="atl-player"><div class="atl-player-screen"><div class="atl-player-mark">▶</div><div class="atl-player-caption">Оберіть сезон і серію</div></div><div class="atl-player-controls"><button type="button" class="atl-button selector atl-season">Сезон</button><button type="button" class="atl-button selector atl-episode-select" disabled>Серія</button><button type="button" class="atl-button selector atl-voice" disabled>Озвучення</button><button type="button" class="atl-button selector atl-subtitle" disabled>Субтитри: вимкнено</button><button type="button" class="atl-button selector atl-play" disabled>▶ Відтворити</button></div><div class="atl-player-status">Завантаження доступних варіантів…</div></div><div class="atl-actions"></div><div class="atl-clear"></div></div>');
         var status = root.find('.atl-status');
         var actions = root.find('.atl-actions');
-        var episodes = root.find('.atl-episodes');
         var alive = true;
         var vodUrls = [];
+        var episodeEntries = [];
+        var relatedSeasons = [];
+        var playbackOptions = [];
+        var subtitleOptions = [];
+        var selectedVoice = 0;
+        var selectedSubtitle = -1;
+        var currentEpisodeLabel = '';
+        var playerStatus = root.find('.atl-player-status');
+        var playerCaption = root.find('.atl-player-caption');
+        var playerScreen = root.find('.atl-player-screen');
         var title = item.title || 'AniTube';
         root.find('.atl-title').text(title);
         scroll.append(root[0]);
@@ -554,6 +563,111 @@
         }
 
         function focusScroll(element) { scroll.update(element); }
+
+        function refreshPlayerUI() {
+            root.find('.atl-season').text('Сезон: ' + title);
+            root.find('.atl-episode-select').text(episodeEntries.length && currentEpisodeLabel ? 'Серія: ' + currentEpisodeLabel : 'Серія');
+            root.find('.atl-episode-select').prop('disabled', !episodeEntries.length);
+            root.find('.atl-voice').text(playbackOptions.length ? 'Озвучення: ' + playbackOptions[selectedVoice].title : 'Озвучення');
+            root.find('.atl-voice').prop('disabled', playbackOptions.length < 2);
+            var subtitleLabel = selectedSubtitle < 0 ? 'вимкнено' : (subtitleOptions[selectedSubtitle] ? subtitleOptions[selectedSubtitle].label : 'увімкнено');
+            root.find('.atl-subtitle').text('Субтитри: ' + subtitleLabel);
+            root.find('.atl-subtitle').prop('disabled', !subtitleOptions.length);
+            root.find('.atl-play').prop('disabled', !playbackOptions.length);
+        }
+
+        function showChoice(heading, items, callback) {
+            if (!items.length) return;
+            Lampa.Select.show({
+                title: heading,
+                items: items,
+                onSelect: function (selected) {
+                    Lampa.Select.close();
+                    callback(selected);
+                },
+                onBack: function () { Lampa.Controller.toggle('content'); }
+            });
+        }
+
+        function chooseSeason() {
+            var choices = [{ title: title, current: true }];
+            relatedSeasons.forEach(function (season) {
+                if (season.url !== item.url) choices.push({ title: season.title, url: season.url });
+            });
+            showChoice('Виберіть сезон', choices, function (selected) {
+                if (selected.current) return;
+                Lampa.Activity.push({
+                    url: selected.url, title: selected.title, component: DETAIL, page: 1,
+                    item: { title: selected.title, url: selected.url }, movie: object.movie || null
+                });
+            });
+        }
+
+        function chooseEpisode() {
+            showChoice('Виберіть серію', episodeEntries.map(function (entry, index) {
+                return { title: entry.label || ('Серія ' + (index + 1)), index: index };
+            }), function (selected) {
+                var entry = episodeEntries[selected.index];
+                if (!entry) return;
+                currentEpisodeLabel = entry.label;
+                playbackOptions = [];
+                subtitleOptions = [];
+                selectedVoice = 0;
+                selectedSubtitle = -1;
+                playerCaption.text('Завантаження: ' + currentEpisodeLabel);
+                playerStatus.text('Отримую дані серії та доступні озвучення…');
+                refreshPlayerUI();
+                loadVod(entry.url);
+            });
+        }
+
+        function chooseVoice() {
+            showChoice('Виберіть озвучення', playbackOptions.map(function (option, index) {
+                return { title: option.title, index: index };
+            }), function (selected) {
+                selectedVoice = selected.index;
+                refreshPlayerUI();
+            });
+        }
+
+        function chooseSubtitle() {
+            var choices = [{ title: 'Вимкнути субтитри', index: -1 }];
+            subtitleOptions.forEach(function (sub, index) {
+                choices.push({ title: sub.label || ('Субтитри ' + (index + 1)), index: index });
+            });
+            showChoice('Виберіть субтитри', choices, function (selected) {
+                selectedSubtitle = selected.index;
+                refreshPlayerUI();
+            });
+        }
+
+        function startPlayback() {
+            var selected = playbackOptions[selectedVoice];
+            if (!selected || !selected.track) {
+                playerStatus.text('Спочатку виберіть серію та дочекайтеся завантаження озвучень.');
+                return;
+            }
+            var track = selected.track;
+            var url = track.cast_avc_url || track.hls_url || (selected.episode && selected.episode.hls_master_url) || '';
+            if (!url) {
+                playerStatus.text('Для цієї озвучки немає прямого HLS-посилання.');
+                return;
+            }
+            var subtitles = selectedSubtitle >= 0 && subtitleOptions[selectedSubtitle] ? [subtitleOptions[selectedSubtitle]] : [];
+            Lampa.Player.play({
+                url: url,
+                title: title + (currentEpisodeLabel ? ' — ' + currentEpisodeLabel : ''),
+                quality: 'auto',
+                subtitles: subtitles,
+                movie: object.movie || null
+            });
+        }
+
+        root.find('.atl-season').on('hover:focus', function () { focusScroll(this); }).on('hover:enter click', chooseSeason);
+        root.find('.atl-episode-select').on('hover:focus', function () { focusScroll(this); }).on('hover:enter click', chooseEpisode);
+        root.find('.atl-voice').on('hover:focus', function () { focusScroll(this); }).on('hover:enter click', chooseVoice);
+        root.find('.atl-subtitle').on('hover:focus', function () { focusScroll(this); }).on('hover:enter click', chooseSubtitle);
+        root.find('.atl-play,.atl-player-screen').on('hover:focus', function () { focusScroll(root.find('.atl-play')[0]); }).on('hover:enter click', startPlayback);
 
         function addButton(label, callback, cls) {
             var button = $('<button type="button" class="atl-button selector"></button>').text(label);
@@ -570,6 +684,7 @@
             var baseTitle = relatedBaseTitle(title);
 
             var candidates = [];
+            relatedSeasons = [];
             var containers = doc.querySelectorAll(
                 '.related, .related-news, .related_news, .related-posts, .related_posts, .related-anime, .related_anime, #related, .news-related'
             );
@@ -606,6 +721,7 @@
                 if (/^(?:попередня|наступна) серія$/i.test(label)) continue;
 
                 seen[href] = true;
+                relatedSeasons.push({ title: label, url: href });
                 var button = $('<button type="button" class="atl-button selector"></button>').text(label);
                 button.on('hover:focus', function () { focusScroll(this); });
                 button.on('hover:enter click', (function (seasonUrl, seasonTitle) {
@@ -642,6 +758,7 @@
                         if (!candidate || candidate !== searchBase) return;
                         if (seen[match.url]) return;
                         seen[match.url] = true;
+                        relatedSeasons.push({ title: cleanTitle(match.title), url: match.url });
                         var button = $('<button type="button" class="atl-button selector"></button>').text(cleanTitle(match.title));
                         button.on('hover:focus', function () { focusScroll(this); });
                         button.on('hover:enter click', (function (seasonUrl, seasonTitle) {
@@ -669,10 +786,8 @@
         function addEpisode(url, label) {
             if (!url || vodUrls.indexOf(url) >= 0) return;
             vodUrls.push(url);
-            var button = $('<button type="button" class="atl-episode selector"></button>').text(label || ('Серія ' + vodUrls.length));
-            button.on('hover:focus', function () { focusScroll(this); });
-            button.on('hover:enter click', function () { loadVod(url); });
-            episodes.append(button);
+            episodeEntries.push({ url: url, label: label || ('Серія ' + episodeEntries.length + 1) });
+            refreshPlayerUI();
         }
 
         function loadPlaylist() {
@@ -700,10 +815,13 @@
                 if (!list.length) list = parseEmbeddedPlaylist(htmlCache);
                 list.forEach(function (entry) { addEpisode(entry.url, entry.label); });
                 if (vodUrls.length) {
-                    status.text('Знайдено серій та варіантів озвучення: ' + vodUrls.length + '. Вибери потрібний пункт нижче.');
+                    status.text('Знайдено серій: ' + vodUrls.length + '. Керування доступне в блоці програвача нижче.');
+                    playerStatus.text('Виберіть серію, потім озвучення та субтитри.');
                 } else {
-                    status.text('AniTube не повернув розпізнаваних пунктів плейлиста. Можливо, список формується іншим запитом або потребує додаткових параметрів.');
+                    status.text('AniTube не повернув розпізнаваних посилань на серії.');
+                    playerStatus.text('Список серій не знайдено. Серверний запит плейлиста ще потрібно виправити.');
                 }
+                refreshPlayerUI();
                 syncNavigation(true);
             }, function (message, xhr) {
                 if (!alive) return;
@@ -713,8 +831,10 @@
                 var httpStatus = xhr && (xhr.status || xhr.statusCode) ? 'HTTP ' + (xhr.status || xhr.statusCode) : '';
                 var responseHint = xhr && xhr.responseText ? String(xhr.responseText).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140) : '';
                 status.text(vodUrls.length
-                    ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
+                    ? 'Знайдено посилання на серії у сторінці тайтлу: ' + vodUrls.length + '.'
                     : 'Не вдалося отримати плейлист AniTube' + (httpStatus ? ' (' + httpStatus + ')' : '') + ': ' + message + (responseHint ? ' — ' + responseHint : ''));
+                playerStatus.text(vodUrls.length ? 'Виберіть серію у блоці програвача.' : 'Поки немає даних для вибору серії. HTTP 403 не усунуто.');
+                refreshPlayerUI();
                 syncNavigation(true);
             }, { 'Referer': item.url, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
         }
@@ -723,49 +843,27 @@
             var episode = data.episode || data;
             var tracks = episode.tracks || [];
             if (!tracks.length) {
-                status.text('API AniTube не повернув доступних аудіодоріжок для цієї серії.');
+                playerStatus.text('API не повернув аудіодоріжок для цієї серії.');
                 return;
             }
-            var options = tracks.map(function (track, index) {
+            playbackOptions = tracks.map(function (track, index) {
                 return {
                     title: track.label || track.voice_studio_name || ('Озвучення ' + (index + 1)),
-                    subtitle: track.track_type || '',
-                    track: track
+                    track: track,
+                    episode: episode
                 };
             });
-            function playTrack(track) {
-                var url = track.cast_avc_url || track.hls_url || episode.hls_master_url || '';
-                if (!url) {
-                    showNotice('Для вибраної озвучки немає прямого HLS-посилання.');
-                    return;
-                }
-                var subs = (episode.subtitles || []).filter(function (sub) {
-                    return sub && sub.url && (sub.kind === 'full' || sub.kind === 'signs');
-                }).map(function (sub) {
-                    return { label: sub.label || sub.voice_studio_name || 'Субтитри', url: sub.url };
-                });
-                var playData = {
-                    url: url,
-                    title: title + (episodeTitle ? ' — ' + episodeTitle : ''),
-                    quality: 'auto',
-                    subtitles: subs,
-                    movie: object.movie || null
-                };
-                status.text('Передаю потік до штатного програвача Lampa. Якщо з’явиться помилка мережі або формату, це означатиме, що AniTube/FenixPlay вимагає додатковий ключ доступу або окрему обробку потоку.');
-                Lampa.Player.play(playData);
-            }
-            if (options.length === 1) playTrack(options[0].track);
-            else {
-                Lampa.Select.show({
-                    title: 'Виберіть озвучення',
-                    items: options,
-                    onSelect: function (selected) {
-                        Lampa.Select.close();
-                        playTrack(selected.track);
-                    },
-                    onBack: function () { Lampa.Controller.toggle('content'); }
-                });
-            }
+            subtitleOptions = (episode.subtitles || []).filter(function (sub) {
+                return sub && sub.url && (sub.kind === 'full' || sub.kind === 'signs');
+            }).map(function (sub) {
+                return { label: sub.label || sub.voice_studio_name || 'Субтитри', url: sub.url };
+            });
+            selectedVoice = 0;
+            selectedSubtitle = -1;
+            currentEpisodeLabel = episodeTitle || currentEpisodeLabel;
+            playerCaption.text('Готово до відтворення: ' + currentEpisodeLabel);
+            playerStatus.text('Доступно озвучень: ' + playbackOptions.length + '. Субтитрів: ' + subtitleOptions.length + '.');
+            refreshPlayerUI();
         }
 
         function loadEpisodeApi(payload, vodUrl) {
@@ -781,7 +879,8 @@
                 var token = extractPlaybackToken(vodHtml);
                 vodPage.clear();
                 if (!token) {
-                    status.text('FenixPlay відкриває сторінку програвача, але в її HTML не знайдено X-Fenix-Playback. Без цього тимчасового ключа API серій не віддає список озвучень. Пряме відкриття сайту тут вимкнено навмисно.');
+                    playerStatus.text('У сторінці FenixPlay не знайдено тимчасовий ключ доступу X-Fenix-Playback.');
+                    playerCaption.text('Не вдалося отримати дані серії');
                     return;
                 }
                 status.text('Отримую дані серії та озвучення…');
@@ -789,10 +888,13 @@
                     if (!alive) return;
                     var json;
                     try { json = JSON.parse(raw); } catch (e) { status.text('FenixPlay повернув некоректну відповідь API.'); return; }
-                    if (json && json.error) { status.text('Помилка FenixPlay: ' + (json.error.message || json.error)); return; }
+                    if (json && json.error) { playerStatus.text('Помилка FenixPlay: ' + (json.error.message || json.error)); return; }
                     playEpisode(json, 'Серія ' + payload.e);
                 }, function (message) {
-                    if (alive) status.text('Не вдалося отримати серію з FenixPlay: ' + message + '. Можлива причина — CORS або вимога додаткового заголовка авторизації.');
+                    if (alive) {
+                        playerStatus.text('Не вдалося отримати дані FenixPlay: ' + message + '. Можливе обмеження CORS для запитів із Lampa.');
+                        playerCaption.text('Серію не вдалося підготувати до відтворення');
+                    }
                 }, { 'X-Fenix-Playback': token });
             }, function (message) {
                 if (alive) status.text('Не вдалося прочитати сторінку FenixPlay: ' + message);
