@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.13';
+    var VERSION = '0.2.14';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0213-style';
+    var STYLE = 'anitube-lampa-v0214-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -71,26 +71,27 @@
     }
 
     function parseCards(html) {
-        var doc = document.createElement('div');
-        doc.innerHTML = html;
-        var found = [];
-        var seen = {};
-        var articles = doc.querySelectorAll('#dle-content article.story');
-        for (var i = 0; i < articles.length; i++) {
-            var article = articles[i];
-            var titleLink = article.querySelector('h2[itemprop="name"] a[href]');
-            if (!titleLink) continue;
-            var href = absolute(titleLink.getAttribute('href'));
-            var title = cleanTitle(titleLink.getAttribute('title') || titleLink.textContent || '');
-            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\.html(?:$|[?#])/i.test(href) || title.length < 2) continue;
-            if (seen[href]) continue;
-            var poster = article.querySelector('span.story_post img, .story_post img');
-            var raw = poster && (poster.getAttribute('data-original') || poster.getAttribute('data-src') ||
-                poster.getAttribute('data-lazy-src') || poster.getAttribute('src'));
+        var doc = document.createElement('div'); doc.innerHTML = html;
+        var found = [], seen = {};
+        function add(link, container) {
+            if (!link) return;
+            var href = absolute(link.getAttribute('href') || '', BASE);
+            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) return;
+            var heading = link.querySelector('h2,h3,h4,[itemprop="name"]');
+            var title = cleanTitle(link.getAttribute('title') || (heading && heading.textContent) || link.textContent || '');
+            if (!title || title.length < 2 || title.length > 180) return;
+            var scope = container || link.parentNode;
+            var poster = scope && scope.querySelector ? scope.querySelector('img') : link.querySelector('img');
+            var raw = poster && (poster.getAttribute('data-original') || poster.getAttribute('data-src') || poster.getAttribute('data-lazy-src') || poster.getAttribute('src'));
             var image = raw ? absolute(raw, BASE) : '';
             if (image && /blank|spacer|pixel|logo|avatar|icon/i.test(image)) image = '';
-            seen[href] = true;
-            found.push({ title: title, url: href, image: image });
+            seen[href] = true; found.push({ title: title, url: href, image: image });
+        }
+        var articles = doc.querySelectorAll('#dle-content article.story, article.story');
+        for (var i = 0; i < articles.length; i++) add(articles[i].querySelector('h2[itemprop="name"] a[href], h2 a[href], h3 a[href], a[href*=".html"]'), articles[i]);
+        if (!found.length) {
+            var links = doc.querySelectorAll('#dle-content a[href], .content a[href], main a[href], a[href]');
+            for (var j = 0; j < links.length; j++) add(links[j], null);
         }
         return found;
     }
@@ -185,6 +186,28 @@
         if (rawParsed.length) return rawParsed;
         return result;
     }
+    function parseEmbeddedPlaylist(html) {
+        var doc = document.createElement('div'); doc.innerHTML = html;
+        var result = [], seen = {};
+        function add(url, label) {
+            var value = absolute(String(url || '').replace(/&amp;/g, '&'), BASE);
+            if (!value || seen[value]) return;
+            if (value.indexOf('fenixplay.xyz/vod/') < 0 && !/\.(m3u8|mp4)(\?|$)/i.test(value)) return;
+            seen[value] = true; result.push({ url: value, label: cleanTitle(label || ('Серія ' + (result.length + 1))) });
+        }
+        var nodes = doc.querySelectorAll('[data-file], [data-src], [data-url], iframe[src], source[src], a[href]');
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i], value = node.getAttribute('data-file') || node.getAttribute('data-src') || node.getAttribute('data-url') || node.getAttribute('src') || node.getAttribute('href') || '';
+            add(value, node.getAttribute('title') || node.getAttribute('aria-label') || (node.textContent || '').replace(/\s+/g, ' ').trim());
+        }
+        var scripts = doc.querySelectorAll('script');
+        for (var j = 0; j < scripts.length; j++) {
+            var re = /https?:\/\/fenixplay\.xyz\/vod\/[A-Za-z0-9._%-]+/ig, match, code = scripts[j].textContent || '';
+            while ((match = re.exec(code))) add(match[0], 'Серія ' + (result.length + 1));
+        }
+        return result;
+    }
+
     function parseNext(html, currentUrl) {
         var doc = document.createElement('div');
         doc.innerHTML = html;
@@ -349,7 +372,7 @@
         function doSearch(event) {
             if (event && event.preventDefault) event.preventDefault();
             var value = root.find('.atl-query').val().trim();
-            if (!value) { load(BASE + 'f//sort=date/order=desc/page/1/'); return; }
+            if (!value) { load(BASE + 'f/sort=date/order=desc/page/1/'); return; }
             // Пошук AniTube: POST на /anime/ з параметрами do/subaction/story у query string.
             var aliases = {
                 'ван піс': 'One Piece',
@@ -395,7 +418,7 @@
         };
         this.stop = function () {};
         this.render = function () { return scroll.render(true); };
-        this.destroy = function () { alive = false; net.clear(); relatedNet.clear(); scroll.destroy(); root.remove(); };
+        this.destroy = function () { alive = false; net.clear(); scroll.destroy(); root.remove(); };
     }
 
     function DetailScreen(object) {
@@ -545,13 +568,14 @@
         }
 
         function loadPlaylist() {
-            var segments = String(item.url || '').split('/');
             var newsId = '';
-            for (var n = 0; n < segments.length; n++) {
-                var dash = segments[n].indexOf('-');
-                if (dash > 0) {
-                    var candidateId = segments[n].slice(0, dash);
-                    if (candidateId && !isNaN(Number(candidateId))) { newsId = candidateId; break; }
+            var pathMatch = String(item.url || '').match(/\/(\d+)-[^/?#]+\.html(?:[?#]|$)/i);
+            if (pathMatch) newsId = pathMatch[1];
+            if (!newsId) {
+                var segments = String(item.url || '').split('/');
+                for (var n = 0; n < segments.length; n++) {
+                    var candidateMatch = segments[n].match(/^(\d+)-/);
+                    if (candidateMatch) { newsId = candidateMatch[1]; break; }
                 }
             }
             if (!newsId) {
@@ -565,6 +589,7 @@
                 if (!alive) return;
                 var list = parsePlaylist(raw);
                 if (!list.length) list = parseLegacyPlaylist(htmlCache);
+                if (!list.length) list = parseEmbeddedPlaylist(htmlCache);
                 list.forEach(function (entry) { addEpisode(entry.url, entry.label); });
                 if (vodUrls.length) {
                     status.text('Знайдено серій та варіантів озвучення: ' + vodUrls.length + '. Вибери потрібний пункт нижче.');
@@ -575,6 +600,7 @@
             }, function (message) {
                 if (!alive) return;
                 var fallback = parseLegacyPlaylist(htmlCache);
+                if (!fallback.length) fallback = parseEmbeddedPlaylist(htmlCache);
                 fallback.forEach(function (entry) { addEpisode(entry.url, entry.label); });
                 status.text(vodUrls.length
                     ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
@@ -742,7 +768,7 @@
         if ($('.atl-menu-item').length) return;
         var item = $('<li class="menu__item selector atl-menu-item"><div class="menu__ico"><svg viewBox="0 0 44 44" aria-hidden="true"><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="currentColor" opacity=".13"/><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m18 16 11 6-11 6V16Z" fill="currentColor"/><path d="M13 10.8 22 6l9 4.8M13 33.2l9 4.8 9-4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m33.5 7 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="currentColor"/></svg></div><div class="menu__text">AniTube</div></li>');
         item.on('hover:enter', function () {
-            Lampa.Activity.push({ url: '', title: 'AniTube', component: LIST, page: 1, sourceUrl: BASE + 'f//sort=date/order=desc/page/1/' });
+            Lampa.Activity.push({ url: '', title: 'AniTube', component: LIST, page: 1, sourceUrl: BASE + 'f/sort=date/order=desc/page/1/' });
         });
         $('.menu .menu__list').eq(0).append(item);
     }
