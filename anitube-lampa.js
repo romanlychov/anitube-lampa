@@ -53,7 +53,7 @@
             + '.atl-player-frame{display:block;width:100%;height:28em;border:0;background:#000;}'
             + '.atl-player-frame.atl-anitube-frame{height:52em;background:#101722;}'
             + '.atl-open-player{display:block;width:100%;padding:1.1em;text-align:left;background:#152b39;border:1px solid #20aeb2;border-radius:.45em;color:#fff;font-size:1.05em;}'
-            + '.atl-full-player{position:absolute;inset:0;width:100%;height:100%;background:#000;}'
+            + '.atl-full-player{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9999;width:100%;height:100%;background:#000;}'
             + '.atl-full-player iframe{display:block;width:100%;height:100%;min-height:100vh;border:0;background:#000;}'
             + '.atl-player-heading{font-size:1.15em;font-weight:600;margin-bottom:.6em;}'
 
