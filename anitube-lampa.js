@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.11';
+    var VERSION = '0.2.12';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0211-style';
+    var STYLE = 'anitube-lampa-v0212-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -65,7 +65,7 @@
     function cleanTitle(value) {
         return String(value || '')
             .replace(/\s+/g, ' ')
-            .replace(/\s+(?:D\+S|Рік випуску аніме:|Рік виходу аніме:|Серій:|Жанр:|Переклад:|Ролі озвучували:)[\s\S]*$/i, '')
+            .replace(/\s+(?:D\+S|Рік випуску аніме:|Рік виходу аніме:|Рік аніме:|Серій:|Жанр:|Категорія:|Переклад:|Ролі озвучували:|Опис:)[\s\S]*$/i, '')
             .replace(/^\s*[|·–—-]+\s*|\s*[|·–—-]+\s*$/g, '')
             .trim();
     }
@@ -255,7 +255,7 @@
         var grid = root.find('.atl-grid');
         var status = root.find('.atl-status');
         var query = object.search || '';
-        var currentUrl = object.sourceUrl || (BASE + 'f//sort=date/order=desc/page/1/');
+        var currentUrl = object.sourceUrl || (BASE + 'f/sort=date/order=desc/page/1/');
         var nextUrl = '';
         var alive = true;
 
@@ -301,7 +301,7 @@
             syncNavigation(false);
         }
 
-        function load(url) {
+        function load(url, homeFallbackTried) {
             currentUrl = url;
             nextUrl = '';
             status.text('Завантаження каталогу AniTube…');
@@ -314,6 +314,10 @@
             requestText(net, requestUrl, function (html) {
                 if (!alive) return;
                 var items = parseCards(html);
+                if (!query && !items.length && url !== BASE && !homeFallbackTried) {
+                    load(BASE, true);
+                    return;
+                }
                 nextUrl = parseNext(html, url);
                 render(items);
                 if (nextUrl) {
@@ -321,10 +325,22 @@
                     more.on('hover:focus', function () { focusScroll(this); });
                     more.on('hover:enter click', function () { load(nextUrl); });
                     root.find('.atl-actions').append(more);
+                } else if (!query && /\/page\/(\d+)\//.test(url)) {
+                    var pageMatch = url.match(/\/page\/(\d+)\//);
+                    var nextPageUrl = url.replace(/\/page\/\d+\//, '/page/' + (Number(pageMatch[1]) + 1) + '/');
+                    var moreFallback = $('<button type="button" class="atl-button selector">Наступна сторінка</button>');
+                    moreFallback.on('hover:focus', function () { focusScroll(this); });
+                    moreFallback.on('hover:enter click', function () { load(nextPageUrl); });
+                    root.find('.atl-actions').append(moreFallback);
                 }
                 syncNavigation(true);
             }, function (message) {
-                if (alive) showError(message);
+                if (!alive) return;
+                if (!query && !homeFallbackTried && url !== BASE && /404|не знайдено|not found/i.test(String(message))) {
+                    load(BASE, true);
+                    return;
+                }
+                showError(message);
             }, searchHeaders, null, query && url.indexOf('/anime/') >= 0 ? { type: 'POST' } : null);
         }
 
@@ -418,14 +434,28 @@
             var baseTitle = cleanTitle(title)
                 .replace(/\s*\([^)]*(?:сезон|season|фільм|movie|ova|спецвипуск)[^)]*\)\s*/ig, ' ')
                 .replace(/\s*[:：-]\s*.+$/, '')
-                .replace(/\s+/g, ' ').trim();
-            if (!baseTitle || baseTitle.length < 4) return;
+                .replace(/\s+/g, ' ').trim().toLowerCase();
 
-            var links = doc.querySelectorAll('#dle-content a[href], .related a[href], .related-news a[href], .similar a[href], a[href]');
+            var candidates = [];
+            var containers = doc.querySelectorAll(
+                '.related, .related-news, .related_news, .related-posts, .related_posts, .related-anime, .related_anime, #related, .news-related'
+            );
+            for (var c = 0; c < containers.length; c++) {
+                var inside = containers[c].querySelectorAll('a[href]');
+                for (var n = 0; n < inside.length; n++) {
+                    candidates.push({ link: inside[n], trusted: true });
+                }
+            }
+
+            var contentLinks = doc.querySelectorAll('#dle-content a[href]');
+            for (var p = 0; p < contentLinks.length; p++) {
+                candidates.push({ link: contentLinks[p], trusted: false });
+            }
+
             var seen = {};
             var added = 0;
-            for (var i = 0; i < links.length; i++) {
-                var link = links[i];
+            for (var i = 0; i < candidates.length; i++) {
+                var link = candidates[i].link;
                 var href = absolute(link.getAttribute('href'), item.url);
                 if (!href || href === item.url || !/\.html(?:$|[?#])/i.test(href) ||
                     !/^https?:\/\/anitube\.in\.ua\//i.test(href) || seen[href]) continue;
@@ -439,8 +469,7 @@
                     link.textContent || ''
                 );
                 if (!label || label.length > 100) continue;
-                if (label.toLowerCase().indexOf(baseTitle.toLowerCase()) !== 0) continue;
-                // Не беремо навігаційні посилання, серії та посилання на профілі/озвучення.
+                if (!candidates[i].trusted && baseTitle && label.toLowerCase().indexOf(baseTitle) !== 0) continue;
                 if (/^(?:попередня|наступна) серія$/i.test(label)) continue;
 
                 seen[href] = true;
