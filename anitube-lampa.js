@@ -2,11 +2,11 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.2';
+    var VERSION = '0.2.3';
     var BASE = 'https://anitube.in.ua/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v022-style';
+    var STYLE = 'anitube-lampa-v023-style';
 
     if (window[ID]) return;
     window[ID] = true;
