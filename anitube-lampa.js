@@ -308,6 +308,10 @@
             var re = /https?:\/\/fenixplay\.xyz\/vod\/[A-Za-z0-9._%-]+/ig, match, code = scripts[j].textContent || '';
             while ((match = re.exec(code))) add(match[0], 'Серія ' + (result.length + 1));
         }
+        // Перевіряємо весь HTML: URL може бути в JSON або data-атрибуті поза script.
+        var source = String(html || '').replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        var rawRe = /https?:\/\/fenixplay\.xyz\/vod\/[A-Za-z0-9._%-]+/ig, rawMatch;
+        while ((rawMatch = rawRe.exec(source))) add(rawMatch[0], 'Серія ' + (result.length + 1));
         return result;
     }
 
@@ -786,7 +790,7 @@
         function addEpisode(url, label) {
             if (!url || vodUrls.indexOf(url) >= 0) return;
             vodUrls.push(url);
-            episodeEntries.push({ url: url, label: label || ('Серія ' + episodeEntries.length + 1) });
+            episodeEntries.push({ url: url, label: label || ('Серія ' + (episodeEntries.length + 1)) });
             refreshPlayerUI();
         }
 
