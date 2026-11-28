@@ -462,7 +462,7 @@
             }, function (message) {
                 if (alive) status.text('Не вдалося завантажити сторінку аніме: ' + message);
             });
-            return scroll.render();
+            return scroll.render(true);
         };
 
         this.start = function () {
