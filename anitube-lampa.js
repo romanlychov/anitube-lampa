@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.12';
+    var VERSION = '0.2.13';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0212-style';
+    var STYLE = 'anitube-lampa-v0213-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -393,11 +393,12 @@
         };
         this.stop = function () {};
         this.render = function () { return scroll.render(true); };
-        this.destroy = function () { alive = false; net.clear(); scroll.destroy(); root.remove(); };
+        this.destroy = function () { alive = false; net.clear(); relatedNet.clear(); scroll.destroy(); root.remove(); };
     }
 
     function DetailScreen(object) {
         var net = new Lampa.Reguest();
+        var relatedNet = new Lampa.Reguest();
         var item = object.item || { title: object.title, url: object.url };
         var scroll = new Lampa.Scroll({ mask: true, over: true });
         var root = $('<div class="atl-wrap atl-detail"><div class="atl-title"></div><div class="atl-status">Завантаження інформації…</div><div class="atl-meta"></div><div class="atl-actions"></div><div class="atl-episodes"></div><div class="atl-clear"></div></div>');
@@ -493,6 +494,43 @@
             if (added) {
                 var heading = $('<div class="atl-meta"></div>').text('Інші сезони та пов’язані частини');
                 actions.prepend(heading);
+            } else if (baseTitle.length >= 3) {
+                // Якщо сторінка не містить явного блоку пов'язаних публікацій,
+                // шукаємо інші публікації з тією самою назвою через пошук AniTube.
+                var searchUrl = BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(baseTitle);
+                requestText(relatedNet, searchUrl, function (searchHtml) {
+                    if (!alive) return;
+                    var matches = parseCards(searchHtml);
+                    var searchBase = baseTitle.replace(/[^a-zа-яіїєґ0-9]+/gi, ' ').trim();
+                    var count = 0;
+                    matches.forEach(function (match) {
+                        if (!match.url || match.url === item.url) return;
+                        var candidate = cleanTitle(match.title).replace(/[^a-zа-яіїєґ0-9]+/gi, ' ').trim().toLowerCase();
+                        if (!candidate || candidate === searchBase || candidate.indexOf(searchBase) !== 0) return;
+                        if (seen[match.url]) return;
+                        seen[match.url] = true;
+                        var button = $('<button type="button" class="atl-button selector"></button>').text(cleanTitle(match.title));
+                        button.on('hover:focus', function () { focusScroll(this); });
+                        button.on('hover:enter click', (function (seasonUrl, seasonTitle) {
+                            return function () {
+                                Lampa.Activity.push({
+                                    url: seasonUrl,
+                                    title: seasonTitle,
+                                    component: DETAIL,
+                                    page: 1,
+                                    item: { title: seasonTitle, url: seasonUrl },
+                                    movie: object.movie || null
+                                });
+                            };
+                        }(match.url, cleanTitle(match.title))));
+                        actions.append(button);
+                        count++;
+                    });
+                    if (count) {
+                        actions.prepend($('<div class="atl-meta"></div>').text('Інші сезони та пов’язані частини'));
+                        syncNavigation(true);
+                    }
+                }, function () {}, { 'Referer': BASE + 'anime/', 'X-Requested-With': 'XMLHttpRequest' }, null, { type: 'POST' });
             }
         }
         function addEpisode(url, label) {
@@ -695,7 +733,7 @@
         };
         this.stop = function () {};
         this.render = function () { return scroll.render(true); };
-        this.destroy = function () { alive = false; net.clear(); scroll.destroy(); root.remove(); };
+        this.destroy = function () { alive = false; net.clear(); relatedNet.clear(); scroll.destroy(); root.remove(); };
     }
 
     function addMenu() {
