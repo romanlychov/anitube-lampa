@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.16';
+    var VERSION = '0.2.17';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0216-style';
+    var STYLE = 'anitube-lampa-v0217-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -82,95 +82,119 @@
         return name;
     }
 
+
     function parseCards(html) {
         var doc = document.createElement('div');
         doc.innerHTML = html;
-        var found = [], seen = {};
-
-        function usableImage(value) {
-            var url = absolute(value, BASE);
-            if (!url) return '';
-            if (/(?:spacer|blank|pixel|transparent|no[-_]?image|logo|avatar|icon)\.(?:gif|png|jpe?g|webp)(?:$|[?#])/i.test(url)) return '';
-            if (!/^https?:\/\//i.test(url)) return '';
-            return url;
-        }
-
-        function imageFromScope(scope) {
-            if (!scope || !scope.querySelectorAll) return '';
-            var images = scope.querySelectorAll('img');
-            for (var i = 0; i < images.length; i++) {
-                var img = images[i];
-                var values = [
-                    img.getAttribute('data-original'),
-                    img.getAttribute('data-src'),
-                    img.getAttribute('data-lazy-src'),
-                    img.getAttribute('data-original-src'),
-                    img.getAttribute('data-image'),
-                    img.getAttribute('data-srcset'),
-                    img.getAttribute('srcset'),
-                    img.getAttribute('src')
-                ];
-                for (var v = 0; v < values.length; v++) {
-                    var raw = String(values[v] || '').trim();
-                    if (!raw) continue;
-                    if (raw.indexOf(',') >= 0) raw = raw.split(',')[0].trim();
-                    raw = raw.split(/\s+/)[0];
-                    var candidate = usableImage(raw);
-                    if (candidate) return candidate;
-                }
+        var found = [], seen = {}, seenImages = {};
+        function getImage(node) {
+            if (!node) return '';
+            var attrs = ['data-original','data-src','data-lazy-src','data-original-src','data-image','data-thumb','data-bg','src'];
+            for (var i = 0; i < attrs.length; i++) {
+                var raw = String(node.getAttribute(attrs[i]) || '').trim();
+                if (!raw) continue;
+                var url = absolute(raw, BASE);
+                if (url && /^https?:\/\//i.test(url) && !/(spacer|blank|pixel|transparent|logo|avatar|icon)/i.test(url)) return url;
             }
-            var links = scope.querySelectorAll('a[href]');
-            for (var j = 0; j < links.length; j++) {
-                var href = links[j].getAttribute('href') || '';
-                if (/\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(href)) {
-                    var linkedImage = usableImage(href);
-                    if (linkedImage) return linkedImage;
-                }
+            var style = node.getAttribute('style') || '';
+            var match = style.match(/background-image\s*:\s*url\(["']?([^"')]+)["']?\)/i);
+            if (match) {
+                var bg = absolute(match[1], BASE);
+                if (bg && !/(spacer|blank|pixel|transparent|logo|avatar|icon)/i.test(bg)) return bg;
             }
             return '';
         }
-
-        function cardScope(link, supplied) {
-            if (supplied) return supplied;
-            var parent = link.parentNode;
-            for (var depth = 0; parent && depth < 6; depth++, parent = parent.parentNode) {
-                if (!parent.querySelector || !parent.querySelector('img')) continue;
-                var links = parent.querySelectorAll('a[href*=".html"]');
-                var className = String(parent.className || '');
-                var semantic = /story|shortstory|news|anime|item/i.test(className) ||
-                    String(parent.tagName || '').toLowerCase() === 'article';
-                // Важливо: беремо найближчий контейнер картки й не піднімаємося
-                // до спільної обгортки каталогу з постерами інших тайтлів.
-                if (semantic || links.length <= 3) return parent;
+        function findPoster(scope, href, title) {
+            if (!scope || !scope.querySelectorAll) return '';
+            var nodes = scope.querySelectorAll('img,[style*="background-image"]');
+            var best = '', rankBest = 0;
+            for (var i = 0; i < nodes.length; i++) {
+                var node = nodes[i], parent = node, rank = 0;
+                while (parent && parent !== scope) {
+                    var tag = String(parent.tagName || '').toLowerCase();
+                    if (tag === 'a') {
+                        if (absolute(parent.getAttribute('href') || '', BASE) === href) rank = Math.max(rank, 4);
+                        break;
+                    }
+                    if (/(^|\s)(story_post|poster|cover|shortstory-image)(\s|$)/i.test(String(parent.className || ''))) rank = Math.max(rank, 3);
+                    parent = parent.parentNode;
+                }
+                var alt = String(node.getAttribute('alt') || node.getAttribute('title') || '').toLowerCase();
+                var t = String(title || '').toLowerCase();
+                if (alt && t && (t.indexOf(alt) >= 0 || alt.indexOf(t) >= 0)) rank = Math.max(rank, 2);
+                if (rank < 2) continue;
+                var url = getImage(node);
+                if (url && rank > rankBest) { best = url; rankBest = rank; }
             }
-            return null;
+            return best;
         }
-
         function add(link, container) {
             if (!link) return;
             var href = absolute(link.getAttribute('href') || '', BASE);
-            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) ||
-                !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) return;
-
+            if (!href || !/^https?:\/\/anitube\.in\.ua\//i.test(href) || !/\/\d+-[^/]+\.html(?:$|[?#])/i.test(href) || seen[href]) return;
             var heading = link.querySelector('h2,h3,h4,[itemprop="name"]');
             var title = cleanTitle(link.getAttribute('title') || (heading && heading.textContent) || link.textContent || '');
             if (!title || title.length < 2 || title.length > 180) return;
-
-            var scope = cardScope(link, container);
-            var image = imageFromScope(scope);
+            var scope = container;
+            if (!scope) {
+                var parent = link.parentNode;
+                for (var depth = 0; parent && depth < 5; depth++, parent = parent.parentNode) {
+                    if (!parent.querySelector || !parent.querySelector('img,[style*="background-image"]')) continue;
+                    var count = parent.querySelectorAll('a[href*=".html"]').length;
+                    var cls = String(parent.className || '');
+                    if (/story|shortstory|news|anime|item/i.test(cls) || String(parent.tagName || '').toLowerCase() === 'article' || count <= 2) { scope = parent; break; }
+                }
+            }
+            var image = findPoster(scope, href, title);
+            if (image) {
+                var key = image.split('?')[0].split('#')[0];
+                if (seenImages[key]) image = '';
+                else seenImages[key] = true;
+            }
             seen[href] = true;
             found.push({ title: title, url: href, image: image });
         }
-
         var articles = doc.querySelectorAll('#dle-content article.story, article.story');
-        for (var i = 0; i < articles.length; i++) {
-            add(articles[i].querySelector('h2[itemprop="name"] a[href], h2 a[href], h3 a[href], a[href*=".html"]'), articles[i]);
-        }
+        for (var i = 0; i < articles.length; i++) add(articles[i].querySelector('h2[itemprop="name"] a[href], h2 a[href], h3 a[href], a[href*=".html"]'), articles[i]);
         if (!found.length) {
             var links = doc.querySelectorAll('#dle-content a[href], .content a[href], main a[href], a[href]');
             for (var j = 0; j < links.length; j++) add(links[j], null);
         }
         return found;
+    }
+
+    function preloadPosters(items, callback) {
+        var queue = [];
+        items.forEach(function (item) { if (item.image) queue.push(item); });
+        if (!queue.length) { callback(); return; }
+        var next = 0, active = 0, done = 0, maxActive = 6;
+        function pump() {
+            while (active < maxActive && next < queue.length) {
+                (function (item) {
+                    active++;
+                    var probe = new Image(), finished = false;
+                    function finish(ok) {
+                        if (finished) return;
+                        finished = true;
+                        active--;
+                        done++;
+                        if (!ok) item.image = '';
+                        if (done === queue.length) callback();
+                        else pump();
+                    }
+                    probe.onload = function () {
+                        if (probe.decode) {
+                            try { probe.decode().then(function () { finish(true); }, function () { finish(true); }); }
+                            catch (e) { finish(true); }
+                        } else finish(true);
+                    };
+                    probe.onerror = function () { finish(false); };
+                    probe.src = item.image;
+                    setTimeout(function () { finish(false); }, 10000);
+                }(queue[next++]));
+            }
+        }
+        pump();
     }
 
     function parsePlaylist(raw) {
@@ -360,6 +384,7 @@
         var currentUrl = object.sourceUrl || (BASE + 'f/sort=date/order=desc/page/1/');
         var nextUrl = '';
         var alive = true;
+        var loadSequence = 0;
 
         scroll.append(root[0]);
         scroll.minus();
@@ -406,6 +431,7 @@
         function load(url, homeFallbackTried) {
             currentUrl = url;
             nextUrl = '';
+            var sequence = ++loadSequence;
             status.text('Завантаження каталогу AniTube…');
             grid.empty();
             root.find('.atl-actions').empty();
@@ -414,15 +440,19 @@
                 ? BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(query)
                 : url;
             requestText(net, requestUrl, function (html) {
-                if (!alive) return;
+                if (!alive || sequence !== loadSequence) return;
                 var items = parseCards(html);
                 if (!query && !items.length && url !== BASE && !homeFallbackTried) {
                     load(BASE, true);
                     return;
                 }
                 nextUrl = parseNext(html, url);
-                render(items);
-                if (nextUrl) {
+                if (!items.length) { render(items); return; }
+                status.text('Знайдено ' + items.length + ' тайтлів. Завантажую та перевіряю постери…');
+                preloadPosters(items, function () {
+                    if (!alive || sequence !== loadSequence) return;
+                    render(items);
+                    if (nextUrl) {
                     var more = $('<button type="button" class="atl-button selector">Наступна сторінка</button>');
                     more.on('hover:focus', function () { focusScroll(this); });
                     more.on('hover:enter click', function () { load(nextUrl); });
@@ -437,9 +467,10 @@
                     moreFallback.on('hover:enter click', function () { load(nextPageUrl); });
                     root.find('.atl-actions').append(moreFallback);
                 }
-                syncNavigation(true);
+                    syncNavigation(true);
+                });
             }, function (message) {
-                if (!alive) return;
+                if (!alive || sequence !== loadSequence) return;
                 if (!query && !homeFallbackTried && url !== BASE && /404|не знайдено|not found/i.test(String(message))) {
                     load(BASE, true);
                     return;
