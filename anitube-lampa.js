@@ -51,13 +51,15 @@
         document.head.appendChild(style);
     }
 
-    function requestText(network, url, success, failure, headers, postData) {
+    function requestText(network, url, success, failure, headers, postData, requestOptions) {
+        var options = { dataType: 'text', timeout: 25000, headers: headers || {} };
+        if (requestOptions) Object.keys(requestOptions).forEach(function (key) { options[key] = requestOptions[key]; });
         network.native(url, function (data) {
             success(String(data || ''));
         }, function (xhr, error) {
             var message = network.errorDecode ? network.errorDecode(xhr, error) : 'Помилка мережі';
             failure(message || 'Не вдалося завантажити сторінку');
-        }, postData || null, { dataType: 'text', timeout: 25000, headers: headers || {} });
+        }, postData || null, options);
     }
 
     function parseCards(html) {
@@ -275,10 +277,10 @@
             grid.empty();
             root.find('.atl-actions').empty();
             var searchHeaders = query ? { 'Referer': BASE + 'anime/', 'X-Requested-With': 'XMLHttpRequest' } : {};
-            var searchData = query && url.indexOf('/anime/') >= 0
-                ? { do: 'search', subaction: 'search', story: query }
-                : null;
-            requestText(net, url, function (html) {
+            var requestUrl = query && url.indexOf('/anime/') >= 0
+                ? BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(query)
+                : url;
+            requestText(net, requestUrl, function (html) {
                 if (!alive) return;
                 var items = parseCards(html);
                 nextUrl = parseNext(html, url);
@@ -292,16 +294,25 @@
                 syncNavigation(true);
             }, function (message) {
                 if (alive) showError(message);
-            });
+            }, searchHeaders, null, query && url.indexOf('/anime/') >= 0 ? { type: 'POST' } : null);
         }
 
         function doSearch(event) {
             if (event && event.preventDefault) event.preventDefault();
             var value = root.find('.atl-query').val().trim();
             if (!value) { load(BASE); return; }
-            // Пошук на AniTube виконується POST-запитом до /anime/, а не GET-параметрами головної сторінки.
+            // Пошук AniTube: POST на /anime/ з параметрами do/subaction/story у query string.
+            var aliases = {
+                'ван піс': 'One Piece',
+                'ван пісс': 'One Piece',
+                'наруто': 'Naruto',
+                'атака титанів': 'Attack on Titan',
+                'клинок що знищує демонів': 'Demon Slayer'
+            };
+            var normalized = value.toLowerCase().replace(/ё/g, 'е').replace(/\\s+/g, ' ').trim();
+            var searchValue = aliases[normalized] || value;
             var url = BASE + 'anime/';
-            Lampa.Activity.push({ url: url, title: 'Пошук: ' + value, component: LIST, page: 1, sourceUrl: url, search: value });
+            Lampa.Activity.push({ url: url, title: 'Пошук: ' + value, component: LIST, page: 1, sourceUrl: url, search: searchValue });
         }
 
         root.find('.atl-search').on('submit', doSearch);
