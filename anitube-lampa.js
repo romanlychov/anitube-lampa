@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.6';
+    var VERSION = '0.2.7';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v026-style';
+    var STYLE = 'anitube-lampa-v027-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -187,16 +187,16 @@
         var nextUrl = '';
         var alive = true;
 
-        scroll.append(root);
+        scroll.append(root[0]);
 
         function syncNavigation(focusFirst) {
             if (!alive) return;
-            Lampa.Controller.collectionSet(scroll.render());
-            if (focusFirst) Lampa.Controller.collectionFocus(false, scroll.render());
+            Lampa.Controller.collectionSet(scroll.render(true));
+            if (focusFirst) Lampa.Controller.collectionFocus(false, scroll.render(true));
         }
 
         function focusScroll(element) {
-            scroll.update($(element), true);
+            scroll.update(element);
         }
 
         function showError(message) {
@@ -272,7 +272,7 @@
         });
         root.find('.atl-refresh').on('hover:focus', function () { focusScroll(this); }).on('hover:enter click', function () { load(currentUrl); });
 
-        this.create = function () { load(currentUrl); return scroll.render(); };
+        this.create = function () { load(currentUrl); return scroll.render(true); };
         this.start = function () {
             Lampa.Controller.add('content', {
                 toggle: function () { syncNavigation(true); },
@@ -289,7 +289,7 @@
             syncNavigation(false);
         };
         this.stop = function () {};
-        this.render = function () { return scroll.render(); };
+        this.render = function () { return scroll.render(true); };
         this.destroy = function () { alive = false; net.clear(); scroll.destroy(); root.remove(); };
     }
 
@@ -305,15 +305,15 @@
         var vodUrls = [];
         var title = item.title || 'AniTube';
         root.find('.atl-title').text(title);
-        scroll.append(root);
+        scroll.append(root[0]);
 
         function syncNavigation(focusFirst) {
             if (!alive) return;
-            Lampa.Controller.collectionSet(scroll.render());
-            if (focusFirst) Lampa.Controller.collectionFocus(false, scroll.render());
+            Lampa.Controller.collectionSet(scroll.render(true));
+            if (focusFirst) Lampa.Controller.collectionFocus(false, scroll.render(true));
         }
 
-        function focusScroll(element) { scroll.update($(element), true); }
+        function focusScroll(element) { scroll.update(element); }
 
         function addButton(label, callback, cls) {
             var button = $('<button type="button" class="atl-button selector"></button>').text(label);
@@ -425,6 +425,10 @@
         }
 
         this.create = function () {
+            addButton('Відкрити сторінку на AniTube', function () {
+                if (Lampa.Browser && Lampa.Browser.open) Lampa.Browser.open(item.url);
+                else showNotice('У цій версії Lampa немає вбудованого браузера. Відкрий AniTube через браузер телевізора.');
+            });
             requestText(net, item.url, function (html) {
                 if (!alive) return;
                 var doc = document.createElement('div');
@@ -477,7 +481,7 @@
             syncNavigation(false);
         };
         this.stop = function () {};
-        this.render = function () { return scroll.render(); };
+        this.render = function () { return scroll.render(true); };
         this.destroy = function () { alive = false; net.clear(); scroll.destroy(); root.remove(); };
     }
 
