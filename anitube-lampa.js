@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.9';
+    var VERSION = '0.2.10';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v029-style';
+    var STYLE = 'anitube-lampa-v0210-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -51,13 +51,13 @@
         document.head.appendChild(style);
     }
 
-    function requestText(network, url, success, failure, headers) {
+    function requestText(network, url, success, failure, headers, postData) {
         network.native(url, function (data) {
             success(String(data || ''));
         }, function (xhr, error) {
             var message = network.errorDecode ? network.errorDecode(xhr, error) : 'Помилка мережі';
             failure(message || 'Не вдалося завантажити сторінку');
-        }, null, { dataType: 'text', timeout: 25000, headers: headers || {} });
+        }, postData || null, { dataType: 'text', timeout: 25000, headers: headers || {} });
     }
 
     function parseCards(html) {
@@ -65,10 +65,10 @@
         doc.innerHTML = html;
         var found = [];
         var seen = {};
-        var articles = doc.querySelectorAll('#dle-content article.story, article.story');
+        var articles = doc.querySelectorAll('#dle-content article.story');
         for (var i = 0; i < articles.length; i++) {
             var article = articles[i];
-            var titleLink = article.querySelector('h2[itemprop="name"] a[href], h2 a[href]');
+            var titleLink = article.querySelector('h2[itemprop="name"] a[href]');
             if (!titleLink) continue;
             var href = absolute(titleLink.getAttribute('href'));
             var title = (titleLink.textContent || titleLink.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
@@ -222,7 +222,7 @@
         var grid = root.find('.atl-grid');
         var status = root.find('.atl-status');
         var query = object.search || '';
-        var currentUrl = object.sourceUrl || BASE;
+        var currentUrl = object.sourceUrl || (BASE + 'f/sort=date/order=desc/page/1/');
         var nextUrl = '';
         var alive = true;
 
@@ -274,6 +274,10 @@
             status.text('Завантаження каталогу AniTube…');
             grid.empty();
             root.find('.atl-actions').empty();
+            var searchHeaders = query ? { 'Referer': BASE + 'anime/', 'X-Requested-With': 'XMLHttpRequest' } : {};
+            var searchData = query && url.indexOf('/anime/') >= 0
+                ? { do: 'search', subaction: 'search', story: query }
+                : null;
             requestText(net, url, function (html) {
                 if (!alive) return;
                 var items = parseCards(html);
@@ -295,7 +299,8 @@
             if (event && event.preventDefault) event.preventDefault();
             var value = root.find('.atl-query').val().trim();
             if (!value) { load(BASE); return; }
-            var url = BASE + '?do=search&subaction=search&story=' + encodeURIComponent(value);
+            // Пошук на AniTube виконується POST-запитом до /anime/, а не GET-параметрами головної сторінки.
+            var url = BASE + 'anime/';
             Lampa.Activity.push({ url: url, title: 'Пошук: ' + value, component: LIST, page: 1, sourceUrl: url, search: value });
         }
 
@@ -410,7 +415,7 @@
                     ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
                     : 'Не вдалося отримати плейлист AniTube: ' + message);
                 syncNavigation(true);
-            });
+            }, { 'Referer': item.url, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
         }
 
         function playEpisode(data, episodeTitle) {
@@ -562,7 +567,7 @@
 
     function addMenu() {
         if ($('.atl-menu-item').length) return;
-        var item = $('<li class="menu__item selector atl-menu-item"><div class="menu__ico"><svg viewBox="0 0 44 44"><rect x="2" y="2" width="40" height="40" rx="9" fill="currentColor" opacity=".16"/><path d="M13 12h18a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H13a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="m19 17 10 7-10 7V17Z" fill="currentColor"/></svg></div><div class="menu__text">AniTube</div></li>');
+        var item = $('<li class="menu__item selector atl-menu-item"><div class="menu__ico"><svg viewBox="0 0 44 44" aria-hidden="true"><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="currentColor" opacity=".13"/><path d="M8 13.5 22 6l14 7.5v17L22 38 8 30.5v-17Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m18 16 11 6-11 6V16Z" fill="currentColor"/><path d="M13 10.8 22 6l9 4.8M13 33.2l9 4.8 9-4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m33.5 7 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="currentColor"/></svg></div><div class="menu__text">AniTube</div></li>');
         item.on('hover:enter', function () {
             Lampa.Activity.push({ url: '', title: 'AniTube', component: LIST, page: 1, sourceUrl: BASE });
         });
@@ -585,7 +590,7 @@
                     title: 'AniTube — ' + search,
                     component: LIST,
                     page: 1,
-                    sourceUrl: BASE + '?do=search&subaction=search&story=' + encodeURIComponent(search),
+                    sourceUrl: BASE + 'anime/',
                     search: search,
                     movie: card
                 });
