@@ -460,7 +460,9 @@
             var baseTitle = cleanTitle(title)
                 .replace(/\s*\([^)]*(?:сезон|season|фільм|movie|ova|спецвипуск)[^)]*\)\s*/ig, ' ')
                 .replace(/\s*[:：-]\s*.+$/, '')
+                .split(/\s*\/\s*/)[0]
                 .replace(/\s+/g, ' ').trim().toLowerCase();
+            if (/^(?:one\s*piece|ван\s*піс|ван\s*пісс)$/i.test(baseTitle)) baseTitle = 'ван піс';
 
             var candidates = [];
             var containers = doc.querySelectorAll(
@@ -522,7 +524,8 @@
             } else if (baseTitle.length >= 3) {
                 // Якщо сторінка не містить явного блоку пов'язаних публікацій,
                 // шукаємо інші публікації з тією самою назвою через пошук AniTube.
-                var searchUrl = BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(baseTitle);
+                var relatedQuery = baseTitle === 'ван піс' ? 'Ван Піс' : baseTitle;
+                var searchUrl = BASE + 'anime/?do=search&subaction=search&story=' + encodeURIComponent(relatedQuery);
                 requestText(relatedNet, searchUrl, function (searchHtml) {
                     if (!alive) return;
                     var matches = parseCards(searchHtml);
