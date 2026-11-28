@@ -93,7 +93,7 @@
                     var raw = '';
                     for (var k = 0; k < attrs.length; k++) {
                         if (attrs[k]) {
-                            raw = attrs[k].split(',')[0].trim().split(/\\s+/)[0];
+                            raw = attrs[k].split(',')[0].trim().split(/\s+/)[0];
                             if (raw) break;
                         }
                     }
@@ -110,8 +110,8 @@
                     }
                 }
                 if (!image && node.getAttribute && node.getAttribute('style')) {
-                    var bg = node.getAttribute('style').match(/background-image\\s*:\\s*url\\([\\'"]?([^\\)'"]+)/i);
-                    if (bg && bg[1]) image = absolute(bg[1]);
+                    var bg = node.getAttribute('style').match(/background-image\s*:\s*url\(([^)]+)\)/i);
+                    if (bg && bg[1]) image = absolute(bg[1].replace(/^['\"]|['\"]$/g, '').trim());
                 }
             }
             seen[href] = true;
