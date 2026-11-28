@@ -2,12 +2,12 @@
     'use strict';
 
     var ID = 'anitube_lampa_plugin';
-    var VERSION = '0.2.19';
+    var VERSION = '0.2.20';
     var BASE = 'https://anitube.in.ua/';
     var FENIX = 'https://fenixplay.xyz/';
     var LIST = 'anitube_lampa_list';
     var DETAIL = 'anitube_lampa_detail';
-    var STYLE = 'anitube-lampa-v0219-style';
+    var STYLE = 'anitube-lampa-v0220-style';
 
     if (window[ID]) return;
     window[ID] = true;
@@ -369,6 +369,7 @@
     function ListScreen(object) {
         var self = this;
         var net = new Lampa.Reguest();
+        var posterNet = new Lampa.Reguest();
         var scroll = new Lampa.Scroll({ mask: true, over: true });
         var root = $('<div class="atl-wrap"><div class="atl-head"><div class="atl-title">AniTube</div><button type="button" class="atl-button selector atl-refresh">Оновити</button></div><form class="atl-search"><input class="atl-query selector" type="text" placeholder="Знайти аніме…" readonly><button class="atl-button selector atl-search-submit" type="submit">Пошук</button></form><div class="atl-status">Завантаження каталогу AniTube…</div><div class="atl-grid"></div><div class="atl-actions"></div></div>');
         var grid = root.find('.atl-grid');
@@ -403,28 +404,71 @@
 
         function render(items) {
             grid.empty();
-            if (!items.length) {
-                status.text('На цій сторінці не знайдено карток аніме. Можливо, змінилася структура сайту.');
-                syncNavigation(false);
-                return;
-            }
+            if (!items.length) { status.text('На цій сторінці не знайдено карток аніме. Можливо, змінилася структура сайту.'); syncNavigation(false); return; }
             status.text('Знайдено елементів: ' + items.length);
             items.forEach(function (item) {
-                var card = $('<div tabindex="0" class="atl-card selector"><img class="atl-poster" alt=""><div class="atl-name"></div></div>');
+                var card = $('<div tabindex="0" class="atl-card selector"><img class="atl-poster atl-missing" alt=""><div class="atl-name"></div></div>');
+                var poster = card.find('img');
                 card.find('.atl-name').text(item.title);
-                if (item.image) card.find('img').attr('src', item.image).removeClass('atl-missing').on('error', function () { $(this).addClass('atl-missing'); });
-                else card.find('img').addClass('atl-missing');
+                if (item.image) poster.attr('src', item.image).removeClass('atl-missing').on('error', function () { $(this).addClass('atl-missing'); });
+                card.data('atl-item-url', item.url); card.data('atl-poster', poster);
                 card.on('hover:focus', function () { focusScroll(this); });
                 card.on('hover:enter click', function () { openItem(item); });
                 grid.append(card);
             });
             syncNavigation(false);
         }
+        function detailPoster(html, pageUrl) {
+            var doc = document.createElement('div'); doc.innerHTML = html;
+            var selectors = ['meta[property="og:image"]','meta[name="twitter:image"]','meta[property="og:image:secure_url"]','meta[itemprop="image"]'];
+            for (var m = 0; m < selectors.length; m++) {
+                var meta = doc.querySelector(selectors[m]), content = meta && meta.getAttribute('content');
+                var url = content ? absolute(content, pageUrl) : '';
+                if (url && /^https?:\/\//i.test(url)) return url;
+            }
+            var imageSelectors = ['#dle-content .fullstory img','#dle-content .full-story img','#dle-content .story_c_text img','#dle-content article img','#dle-content img[itemprop="image"]','#dle-content img'];
+            for (var i = 0; i < imageSelectors.length; i++) {
+                var images = doc.querySelectorAll(imageSelectors[i]);
+                for (var j = 0; j < images.length; j++) {
+                    var node = images[j], raw = node.getAttribute('data-original') || node.getAttribute('data-src') || node.getAttribute('data-lazy-src') || node.getAttribute('src');
+                    var image = absolute(raw, pageUrl);
+                    if (image && /^https?:\/\//i.test(image) && !/(?:spacer|blank|pixel|transparent|placeholder|no[-_]?image|avatar|logo)/i.test(image)) return image;
+                }
+            }
+            return '';
+        }
+        function recoverMissingPosters(items, sequence, done) {
+            var queue = items.filter(function (item) { return !item.image; }), running = 0, completed = 0, total = queue.length;
+            function pump() {
+                if (!alive || sequence !== loadSequence) return;
+                while (running < 3 && queue.length) (function (item) {
+                    running++;
+                    requestText(posterNet, item.url, function (html) {
+                        if (alive && sequence === loadSequence) {
+                            var url = detailPoster(html, item.url);
+                            if (url) {
+                                item.image = url;
+                                grid.children('.atl-card').each(function () {
+                                    if ($(this).data('atl-item-url') === item.url) {
+                                        var img = $(this).data('atl-poster');
+                                        if (img) img.attr('src', url).removeClass('atl-missing').off('error').on('error', function () { $(this).addClass('atl-missing'); });
+                                    }
+                                });
+                            }
+                        }
+                        running--; completed++; pump();
+                    }, function () { running--; completed++; pump(); });
+                }(queue.shift()));
+                if (!running && !queue.length && done) done({total:total,completed:completed});
+            }
+            if (!total) { if (done) done({total:0,completed:0}); } else pump();
+        }
 
         function load(url, homeFallbackTried) {
             currentUrl = url;
             nextUrl = '';
             var sequence = ++loadSequence;
+            posterNet.clear();
             status.text('Завантаження каталогу AniTube…');
             grid.empty();
             root.find('.atl-actions').empty();
@@ -441,11 +485,12 @@
                 }
                 nextUrl = parseNext(html, url);
                 if (!items.length) { render(items); return; }
-                status.text('Знайдено ' + items.length + ' тайтлів. Завантажую та перевіряю постери…');
-                preloadPosters(items, function () {
-                    if (!alive || sequence !== loadSequence) return;
-                    render(items);
-                    if (nextUrl) {
+                render(items);
+                status.text('Знайдено ' + items.length + ' тайтлів. Довантажую відсутні постери зі сторінок самих тайтлів…');
+                recoverMissingPosters(items, sequence, function (result) {
+                    if (alive && sequence === loadSequence) status.text('Знайдено ' + items.length + ' тайтлів. Додатково перевірено сторінок: ' + result.completed + '.');
+                });
+                if (nextUrl) {
                     var more = $('<button type="button" class="atl-button selector">Наступна сторінка</button>');
                     more.on('hover:focus', function () { focusScroll(this); });
                     more.on('hover:enter click', function () { load(nextUrl); });
@@ -461,7 +506,6 @@
                     root.find('.atl-actions').append(moreFallback);
                 }
                     syncNavigation(true);
-                });
             }, function (message) {
                 if (!alive || sequence !== loadSequence) return;
                 if (!query && !homeFallbackTried && url !== BASE && /404|не знайдено|not found/i.test(String(message))) {
@@ -521,7 +565,7 @@
         };
         this.stop = function () {};
         this.render = function () { return scroll.render(true); };
-        this.destroy = function () { alive = false; net.clear(); scroll.destroy(); root.remove(); };
+        this.destroy = function () { alive = false; net.clear(); posterNet.clear(); scroll.destroy(); root.remove(); };
     }
 
     function DetailScreen(object) {
