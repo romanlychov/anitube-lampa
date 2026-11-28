@@ -381,6 +381,46 @@
             return button;
         }
 
+        function addRelatedSeasons(html) {
+            var doc = document.createElement('div');
+            doc.innerHTML = html;
+            var rootTitle = String(title || '').replace(/\s*\([^)]*(?:сезон|season|фільм|movie|ova|спецвипуск)[^)]*\)\s*/ig, ' ').replace(/\s+/g, ' ').trim();
+            if (!rootTitle) return;
+            var links = doc.querySelectorAll('a[href]');
+            var seen = {};
+            var added = 0;
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i];
+                var label = (link.textContent || link.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+                var href = absolute(link.getAttribute('href'), item.url);
+                if (!label || !href || href === item.url || !/\.html(?:$|[?#])/i.test(href)) continue;
+                if (!/^https?:\/\/anitube\.in\.ua\//i.test(href)) continue;
+                if (label.toLowerCase().indexOf(rootTitle.toLowerCase()) !== 0) continue;
+                if (seen[href]) continue;
+                seen[href] = true;
+                var button = $('<button type="button" class="atl-button selector"></button>').text('Тайтл / сезон: ' + label);
+                button.on('hover:focus', function () { focusScroll(this); });
+                button.on('hover:enter click', (function (seasonUrl, seasonTitle) {
+                    return function () {
+                        Lampa.Activity.push({
+                            url: seasonUrl,
+                            title: seasonTitle,
+                            component: DETAIL,
+                            page: 1,
+                            item: { title: seasonTitle, url: seasonUrl },
+                            movie: object.movie || null
+                        });
+                    };
+                }(href, label)));
+                actions.append(button);
+                added++;
+            }
+            if (added) {
+                var heading = $('<div class="atl-meta"></div>').text('Інші сезони та пов’язані частини');
+                actions.prepend(heading);
+            }
+        }
+
         function addEpisode(url, label) {
             if (!url || vodUrls.indexOf(url) >= 0) return;
             vodUrls.push(url);
@@ -426,7 +466,7 @@
                     ? 'Список серій отримано зі сценарію плеєра AniTube. Вибери потрібний пункт нижче.'
                     : 'Не вдалося отримати плейлист AniTube: ' + message);
                 syncNavigation(true);
-            }, { 'Referer': item.url, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/javascript, */*; q=0.01' });
+            }, { 'Referer': item.url, 'Accept': 'application/json, text/javascript, */*; q=0.01' });
         }
 
         function playEpisode(data, episodeTitle) {
@@ -547,6 +587,9 @@
                     root.find('.atl-title').text(title);
                 }
                 if (text) root.find('.atl-meta').text(text.textContent.split(/\s+/).join(' ').trim().slice(0, 1800));
+
+                // Пов'язані сезони/частини на сторінках AniTube подані окремими посиланнями.
+                addRelatedSeasons(html);
 
                 // Основний спосіб AniTube: AJAX playlist endpoint за ID публікації.
                 loadPlaylist();
